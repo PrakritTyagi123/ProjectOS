@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, statusOf } from './store'
 import { CATEGORIES, MACHINES, PLAN_STATES } from './data'
-import { Icon, Glyph, StatusPill, PlanChip, Button, Heartbeat, LiveBars, Led, STATUS, clock, ago, uptime, useNow, gb, catVar } from './ui'
+import { Icon, Glyph, StatusPill, PlanChip, Button, Knob, Heartbeat, LiveBars, Led, STATUS, clock, ago, uptime, useNow, gb, catVar } from './ui'
 import { RunControls, Power, go } from './App'
 import Readme from './Readme'
 
@@ -13,25 +13,28 @@ const STEPS = [
 ]
 
 function Lifecycle({ p, r, st }) {
-  const idx = st === 'running' ? 4 : st === 'starting' ? STEPS.findIndex((s) => s[0] === r.phase) : st === 'failed' ? 1 : -1
-  const fill = st === 'running' ? 100 : idx < 0 ? 0 : (idx / 3) * 100
+  useNow(st === 'starting' ? 100 : 5000)
+  const idx = st === 'running' ? 4 : st === 'starting' ? Math.max(0, STEPS.findIndex((s) => s[0] === r.phase)) : st === 'failed' ? 1 : -1
+  const fill = st === 'running' ? 100 : idx <= 0 ? 0 : (idx / 3) * 100
+  const elapsed = st === 'starting' && r.startedAt ? ((Date.now() - r.startedAt) / 1000).toFixed(1) : null
   return (
-    <section className="panel span-2 lifecycle">
+    <section className={'panel span-2 lifecycle lc-' + st}>
       <header className="panel-h">
         <h3>Lifecycle</h3>
-        <span className="muted small">
-          {st === 'running' && r.readyMs ? `Reached ready in ${(r.readyMs / 1000).toFixed(1)} s` : st === 'failed' ? 'Last start failed during boot' : st === 'starting' ? 'Starting…' : 'A process existing is not the same as ready'}
+        <span className={'lc-status st st-' + (st === 'running' ? 'good' : st === 'starting' ? 'busy' : st === 'failed' ? 'bad' : 'idle')}>
+          {st === 'running' && r.readyMs ? `Ready in ${(r.readyMs / 1000).toFixed(1)} s` : st === 'failed' ? 'Failed during boot' : st === 'starting' ? <>Starting <span className="num">{elapsed} s</span></> : 'Stopped'}
         </span>
       </header>
-      <ol className={'steps steps-' + st} style={{ '--fill': fill + '%' }}>
+      <ol className={'steps steps-' + st} style={{ '--fill': fill }}>
         {STEPS.map(([k, t, d], i) => {
-          const cls = st === 'failed' && i === idx ? 'step-bad' : i < idx ? 'step-done' : i === idx ? 'step-now' : ''
+          const cls = st === 'failed' && i === idx ? 'step-bad' : i < idx || st === 'running' ? 'step-done' : i === idx ? 'step-now' : ''
           const skip = k === 'health' && !p.health
           return (
-            <li key={k} className={'step ' + cls + (skip ? ' step-skip' : '')}>
-              <span className="step-mark">{cls === 'step-done' ? <Icon name="check" size={13} /> : cls === 'step-bad' ? <Icon name="x" size={13} /> : i + 1}</span>
+            <li key={k} className={'step ' + cls + (skip ? ' step-skip' : '')} style={{ '--si': i }}>
+              <span className="step-mark">{cls === 'step-done' ? <Icon name="check" size={15} /> : cls === 'step-bad' ? <Icon name="x" size={15} /> : <span className="num">{i + 1}</span>}</span>
               <b>{t}</b>
               <span className="small muted">{skip ? 'No health URL; alive process counts as ready' : d}</span>
+              {cls === 'step-now' && <span className="step-live small num">{k === 'health' ? 'Polling' : 'Working'} for {elapsed} s</span>}
             </li>
           )
         })}
@@ -188,7 +191,8 @@ function LogsTab({ p, r }) {
   return (
     <section className="panel logs-panel">
       <div className="toolbar">
-        <div className="seg">
+        <div className="seg has-knob">
+          <Knob />
           {[
             ['all', 'All output'],
             ['err', 'Errors'],
@@ -565,7 +569,8 @@ export default function ProjectPage({ p, readme }) {
         </div>
       )}
 
-      <div className="tabs" role="tablist">
+      <div className="tabs has-knob" role="tablist">
+        <Knob />
         {tabs.map(([k, v]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
             {v}

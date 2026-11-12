@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { useWeek, todayIdx } from './week'
 import { useStore } from './store'
-import { PLAN_STATES, WEEK } from './data'
-import { Icon, Glyph, Button, catVar } from './ui'
+import { PLAN_STATES } from './data'
+import { Icon, Glyph, Button, Num, catVar } from './ui'
 
 function Card({ p }) {
   const { state, engine } = useStore()
@@ -53,46 +54,93 @@ function Card({ p }) {
   )
 }
 
+const MAXH = 6
+function DaySlider({ d, i, today, onChange }) {
+  const col = useRef(null)
+  const setFromY = (y) => {
+    const r = col.current.getBoundingClientRect()
+    const h = Math.round(((r.bottom - y) / r.height) * MAXH * 2) / 2
+    onChange(Math.max(0, Math.min(MAXH, h)))
+  }
+  const down = (e) => {
+    if (d.rest) return
+    e.preventDefault()
+    col.current.setPointerCapture(e.pointerId)
+    setFromY(e.clientY)
+  }
+  const move = (e) => col.current.hasPointerCapture?.(e.pointerId) && setFromY(e.clientY)
+  const key = (e) => {
+    if (d.rest) return
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') (e.preventDefault(), onChange(Math.min(MAXH, d.plan + 0.5)))
+    if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') (e.preventDefault(), onChange(Math.max(0, d.plan - 0.5)))
+  }
+  return (
+    <div className={'wk ' + (today ? 'wk-today' : '') + (d.rest ? ' wk-rest' : '')}>
+      <div
+        ref={col}
+        className="wk-col"
+        role="slider"
+        tabIndex={d.rest ? -1 : 0}
+        aria-label={`${d.d} planned hours`}
+        aria-valuemin={0}
+        aria-valuemax={MAXH}
+        aria-valuenow={d.plan}
+        aria-disabled={d.rest}
+        onPointerDown={down}
+        onPointerMove={move}
+        onKeyDown={key}
+      >
+        {d.rest ? (
+          <span className="wk-restlabel">Rest</span>
+        ) : (
+          <>
+            <span className="wk-plan" style={{ height: (d.plan / MAXH) * 100 + '%' }}>
+              <i className="wk-knob" />
+            </span>
+            <span className="wk-done" style={{ height: (Math.min(d.done, MAXH) / MAXH) * 100 + '%', animationDelay: i * 0.06 + 's' }} />
+          </>
+        )}
+      </div>
+      <span className="wk-d small">{d.d}</span>
+      <span className="wk-h small muted num">{d.rest ? '–' : d.plan + 'h'}</span>
+      <button className="wk-rest-btn small" onClick={() => onChange(d.rest ? 1 : 0, !d.rest)} aria-pressed={!!d.rest} title={d.rest ? 'Make it a work evening' : 'Make it a rest evening'}>
+        {d.rest ? 'Rest' : 'Work'}
+      </button>
+    </div>
+  )
+}
+
 function Week() {
-  const max = 4
-  const plan = WEEK.reduce((a, d) => a + d.plan, 0)
-  const done = WEEK.reduce((a, d) => a + d.done, 0)
-  const today = new Date().getDay() // 0 Sun
-  const todayIdx = (today + 6) % 7
+  const [week, setWeek] = useWeek()
+  const plan = week.reduce((a, d) => a + (d.rest ? 0 : d.plan), 0)
+  const done = week.reduce((a, d) => a + d.done, 0)
+  const rests = week.filter((d) => d.rest).length
+  const ti = todayIdx()
+  const change = (i, h, rest) => setWeek(week.map((d, j) => (j === i ? { ...d, plan: h, rest: rest === undefined ? d.rest : rest } : d)))
   return (
     <section className="panel">
       <header className="panel-h">
         <div>
           <h3>This week</h3>
-          <span className="muted small">Outside office hours, 9:00 to 17:30</span>
+          <span className="muted small">Drag a bar to plan hours outside office time</span>
         </div>
-        <span className="num">
-          {done.toFixed(1)} of {plan} h
+        <span className="wk-total">
+          <b className="num"><Num value={done} decimals={1} /></b>
+          <span className="muted small num">of <Num value={plan} decimals={1} /> h</span>
         </span>
       </header>
-      <div className="week" role="img" aria-label={`${done.toFixed(1)} of ${plan} planned hours done this week`}>
-        {WEEK.map((d, i) => (
-          <div key={d.d} className={'wk ' + (i === todayIdx ? 'wk-today' : '') + (d.rest ? ' wk-rest' : '')}>
-            <div className="wk-col">
-              {d.rest ? (
-                <span className="wk-restlabel">Rest</span>
-              ) : (
-                <>
-                  <span className="wk-plan" style={{ height: (d.plan / max) * 100 + '%' }} />
-                  <span className="wk-done" style={{ height: (d.done / max) * 100 + '%' }} />
-                </>
-              )}
-            </div>
-            <span className="wk-d small">{d.d}</span>
-            <span className="wk-h small muted num">{d.rest ? '' : d.plan + 'h'}</span>
-          </div>
+      <div className="week">
+        {week.map((d, i) => (
+          <DaySlider key={d.d} d={d} i={i} today={i === ti} onChange={(h, rest) => change(i, h, rest)} />
         ))}
       </div>
       <ul className="legend">
         <li><span className="sw sw-plan" />Planned</li>
         <li><span className="sw sw-done" />Done</li>
       </ul>
-      <p className="small muted">Missed a day? Skip it. Don’t borrow from sleep.</p>
+      <p className={'small ' + (plan > 10 ? 'c-bad' : rests === 0 ? 'c-warn' : 'muted')}>
+        {plan > 10 ? `${plan} h is more than the 10 h you said is sustainable. Trim a day.` : rests === 0 ? 'No rest evening this week. Keep at least one.' : 'Missed a day? Skip it. Don’t borrow from sleep.'}
+      </p>
     </section>
   )
 }

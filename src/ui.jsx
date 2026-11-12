@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { PLAN_STATES } from './data'
 
 // ── formatting ───────────────────────────────────────────────
@@ -161,24 +161,87 @@ export function Modal({ title, onClose, children, wide }) {
 // ── v2 visual pieces ─────────────────────────────────────────
 export const catVar = (c) => `var(--c-${c})`
 
-// Radial gauge, 270° sweep.
-export function Gauge({ value, max = 100, label, unit = '%', color = 'var(--accent)', sub }) {
-  const r = 34
+// Count-up number. Tweens from the previous value.
+export function Num({ value, decimals = 0, ms = 700 }) {
+  const [shown, setShown] = useState(value)
+  const from = useRef(value)
+  useEffect(() => {
+    const start = performance.now()
+    const a = from.current
+    const b = value
+    if (a === b) return
+    let raf
+    const step = (t) => {
+      const k = Math.min(1, (t - start) / ms)
+      const e = 1 - Math.pow(1 - k, 3)
+      const v = a + (b - a) * e
+      setShown(v)
+      if (k < 1) raf = requestAnimationFrame(step)
+      else from.current = b
+    }
+    raf = requestAnimationFrame(step)
+    return () => {
+      cancelAnimationFrame(raf)
+      from.current = b
+    }
+  }, [value, ms])
+  return <>{Number(shown).toFixed(decimals)}</>
+}
+
+// Sliding pressed/raised indicator behind the `.on` child of its parent.
+export function Knob({ variant = 'out' }) {
+  const ref = useRef(null)
+  const place = () => {
+    const k = ref.current
+    if (!k) return
+    const on = k.parentElement.querySelector(':scope > .on')
+    if (!on) return (k.style.opacity = '0')
+    k.style.opacity = '1'
+    k.style.width = on.offsetWidth + 'px'
+    k.style.height = on.offsetHeight + 'px'
+    k.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`
+    if (!k.dataset.ready) requestAnimationFrame(() => k && (k.dataset.ready = '1'))
+  }
+  useLayoutEffect(place)
+  useEffect(() => {
+    window.addEventListener('resize', place)
+    const t = setTimeout(place, 300) // after web fonts settle
+    return () => {
+      window.removeEventListener('resize', place)
+      clearTimeout(t)
+    }
+  }, [])
+  return <span ref={ref} className={'knob knob-' + variant} aria-hidden="true" />
+}
+
+// Neumorphic dial: inset groove, raised centre disc, needle on the rim, tick marks.
+const TICKS = Array.from({ length: 28 }, (_, i) => -135 + (270 / 27) * i)
+export function Gauge({ value, max = 100, label, unit = '%', color = 'var(--accent)' }) {
+  const r = 39
   const C = 2 * Math.PI * r
   const sweep = C * 0.75
   const pct = Math.max(0, Math.min(1, value / max))
   return (
     <div className="gauge" style={{ '--g': color }}>
-      <svg viewBox="0 0 84 84" aria-hidden="true">
-        <circle cx="42" cy="42" r={r} className="g-track" strokeDasharray={`${sweep} ${C}`} transform="rotate(135 42 42)" />
-        <circle cx="42" cy="42" r={r} className="g-val" strokeDasharray={`${sweep * pct} ${C}`} transform="rotate(135 42 42)" />
-      </svg>
-      <div className="g-read">
-        <b className="num">{unit === '%' ? Math.round(value) : value.toFixed(1)}</b>
-        <span>{unit === '%' ? '%' : `/${max}${unit}`}</span>
+      <div className="dial">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          {TICKS.map((d, i) => (
+            <line key={i} x1="50" y1="3.5" x2="50" y2={i % 9 === 0 ? 8.5 : 6.5} className={'tick' + ((i / 27) <= pct + 0.001 ? ' tick-on' : '')} transform={`rotate(${d} 50 50)`} />
+          ))}
+          <circle cx="50" cy="50" r={r} className="g-track" strokeDasharray={`${sweep} ${C}`} transform="rotate(135 50 50)" />
+          <circle cx="50" cy="50" r={r} className="g-val" strokeDasharray={`${sweep * pct} ${C}`} transform="rotate(135 50 50)" />
+        </svg>
+        <div className="dial-needle" style={{ transform: `rotate(${-135 + 270 * pct}deg)` }}>
+          <i />
+        </div>
+        <div className="dial-disc">
+          <b className="num">
+            <Num value={value} decimals={unit === '%' ? 0 : 1} />
+          </b>
+          <span>{unit === '%' ? '%' : `of ${max} GB`}</span>
+        </div>
       </div>
       <div className="g-label">{label}</div>
-      {sub && <div className="g-sub">{sub}</div>}
     </div>
   )
 }
@@ -198,7 +261,7 @@ export function Ring({ done, total, size = 96 }) {
       </defs>
       <circle cx="48" cy="48" r={r} className="ring-track" />
       <circle cx="48" cy="48" r={r} className="ring-val" strokeDasharray={`${(C * done) / Math.max(1, total)} ${C}`} transform="rotate(-90 48 48)" />
-      <text x="48" y="47" textAnchor="middle" className="ring-n">{done}</text>
+      <text x="48" y="47" textAnchor="middle" className="ring-n"><Num value={done} /></text>
       <text x="48" y="64" textAnchor="middle" className="ring-of">of {total}</text>
     </svg>
   )

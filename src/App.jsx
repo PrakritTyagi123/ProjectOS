@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { useStore, statusOf } from './store'
 import { MACHINES } from './data'
-import { Icon, Glyph, Button, Modal, Led, ago, useNow, uptime } from './ui'
+import { Icon, Glyph, Button, Modal, Led, Knob, ago, useNow, uptime } from './ui'
 import Overview from './Overview'
 import ProjectPage from './ProjectPage'
 import PlanPage from './PlanPage'
@@ -165,31 +166,46 @@ function Toast() {
   )
 }
 
-// Theme: light / dark / system. Sets data-theme on <html>; remembered per browser.
+// Theme: light / dark / system. One atomic swap of data-theme on <html>,
+// revealed with a circular wipe from the button (View Transitions), or instantly where unsupported.
+const THEME_KEY = 'projectos-theme'
+function applyTheme(mode) {
+  const root = document.documentElement
+  if (mode === 'system') root.removeAttribute('data-theme')
+  else root.setAttribute('data-theme', mode)
+}
 function useTheme() {
   const [mode, setMode] = useState(() => {
-    try { return localStorage.getItem('projectos-theme') || 'light' } catch { return 'light' }
+    try { return localStorage.getItem(THEME_KEY) || 'system' } catch { return 'system' }
   })
-  useEffect(() => {
-    const root = document.documentElement
-    root.classList.add('theming')
-    if (mode === 'system') root.removeAttribute('data-theme')
-    else root.setAttribute('data-theme', mode)
-    try { localStorage.setItem('projectos-theme', mode) } catch {}
-    const t = setTimeout(() => root.classList.remove('theming'), 450)
-    return () => clearTimeout(t)
+  useLayoutEffect(() => {
+    applyTheme(mode)
+    try { localStorage.setItem(THEME_KEY, mode) } catch {}
   }, [mode])
-  return [mode, setMode]
+  const change = (next, e) => {
+    if (next === mode) return
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (!document.startViewTransition || reduced) return setMode(next)
+    const r = e?.currentTarget?.getBoundingClientRect()
+    const root = document.documentElement
+    root.style.setProperty('--vx', r ? r.left + r.width / 2 + 'px' : '50%')
+    root.style.setProperty('--vy', r ? r.top + r.height / 2 + 'px' : '0px')
+    document.startViewTransition(() => {
+      applyTheme(next)
+      flushSync(() => setMode(next))
+    })
+  }
+  return [mode, change]
 }
 
 function ThemeSwitch() {
-  const [mode, setMode] = useTheme()
+  const [mode, change] = useTheme()
   const opts = [['light', 'sun', 'Light'], ['dark', 'moon', 'Dark'], ['system', 'auto', 'Match system']]
   return (
     <div className="theme-sw" data-v={mode} role="radiogroup" aria-label="Theme">
       <span className="theme-knob" aria-hidden="true" />
       {opts.map(([k, ic, label]) => (
-        <button key={k} role="radio" aria-checked={mode === k} aria-label={label} title={label} className={(mode === k ? 'on ' : '') + (k === 'system' ? 'sys' : '')} onClick={() => setMode(k)}>
+        <button key={k} role="radio" aria-checked={mode === k} aria-label={label} title={label} className={(mode === k ? 'on ' : '') + (k === 'system' ? 'sys' : '')} onClick={(e) => change(k, e)}>
           <Icon name={ic} />
         </button>
       ))}
@@ -215,7 +231,8 @@ function TopBar({ route, onAdd }) {
           </span>
           <span className="brand-name">ProjectOS</span>
         </a>
-        <nav className="nav" aria-label="Main">
+        <nav className="nav has-knob" aria-label="Main">
+          <Knob variant="in" />
           {[
             ['overview', 'grid', 'Overview'],
             ['plan', 'flag', 'Plan'],
@@ -247,7 +264,28 @@ function TopBar({ route, onAdd }) {
   )
 }
 
+// Soft light that follows the pointer across raised surfaces.
+function usePointerLight() {
+  useEffect(() => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches || matchMedia('(hover: none)').matches) return
+    let last = null
+    const move = (e) => {
+      const el = e.target.closest?.('.panel, .hud-card, .mod, .pcard, .proj-hero')
+      if (last && last !== el) last.classList.remove('lit')
+      if (!el) return (last = null)
+      const r = el.getBoundingClientRect()
+      el.style.setProperty('--mx', e.clientX - r.left + 'px')
+      el.style.setProperty('--my', e.clientY - r.top + 'px')
+      el.classList.add('lit')
+      last = el
+    }
+    document.addEventListener('pointermove', move, { passive: true })
+    return () => document.removeEventListener('pointermove', move)
+  }, [])
+}
+
 export default function App() {
+  usePointerLight()
   const route = useRoute()
   const { state, engine } = useStore()
   const [adding, setAdding] = useState(false)
@@ -282,7 +320,9 @@ export default function App() {
               </div>
             </div>
           )}
-          {page}
+          <div className="route" key={route.replace(/^readme-/, 'project-')}>
+            {page}
+          </div>
           <footer className="foot">
             Demo data. Nothing here touches a real machine.{' '}
             <button className="link" onClick={engine.reset}>

@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useStore, statusOf } from './store'
 import { CATEGORIES, MACHINES } from './data'
-import { Icon, Glyph, PlanChip, Gauge, Ring, LiveBars, Led, STATUS, Button, uptime, ago, useNow, gb, catVar } from './ui'
+import { Icon, Glyph, PlanChip, Gauge, Ring, LiveBars, Led, STATUS, Button, Num, Knob, uptime, ago, useNow, gb, catVar } from './ui'
 import { Power } from './App'
+import { useWeek, todayIdx, sessionStart } from './week'
 
 function ActiveCard() {
   const { state } = useStore()
@@ -103,7 +104,7 @@ function MachineCard() {
       <ul className="legend">
         {on && vramUsers.map((p) => (
           <li key={p.id}>
-            <span className="sw" style={{ background: `hsl(${p.hue} 40% 62%)` }} />
+            <span className="sw" style={{ background: `hsl(${p.hue} 75% 55%)` }} />
             {p.name} {gb(state.runtime[p.id].vram)}
           </li>
         ))}
@@ -152,7 +153,7 @@ function LiveCard() {
       <div className="mix-legend small">
         {segs.map(([k, v]) => v > 0 && (
           <span key={k}>
-            <Led status={k} /> <b className="num">{v}</b> {k === 'starting' ? 'changing' : STATUS[k].label.toLowerCase()}
+            <Led status={k} /> <b className="num"><Num value={v} ms={400} /></b> {k === 'starting' ? 'changing' : STATUS[k].label.toLowerCase()}
           </span>
         ))}
       </div>
@@ -219,6 +220,9 @@ function Module({ p, i }) {
             {p.port ? `, ${p.udp ? 'UDP' : 'port'} ${p.port}` : ''}
           </span>
         </a>
+        <a className="mod-doc" href={'#readme-' + p.id} title={`${p.name} README`} aria-label={`${p.name} README`}>
+          <Icon name="doc" size={15} />
+        </a>
         <Power p={p} />
       </div>
       <div className="mod-viz">
@@ -242,12 +246,75 @@ function Module({ p, i }) {
             <span className="muted">{CATEGORIES[p.category]}</span>
           )}
         </span>
-        <a className="mod-doc" href={'#readme-' + p.id} title={`${p.name} README`} aria-label={`${p.name} README`}>
-          <Icon name="doc" size={14} />
-        </a>
         <PlanChip state={pl.state} />
       </div>
     </li>
+  )
+}
+
+// A day from 06:00 to 24:00: office block, planned session, rest, and a "now" knob.
+const D0 = 6
+const D1 = 24
+const pos = (h) => ((Math.min(D1, Math.max(D0, h)) - D0) / (D1 - D0)) * 100
+const fmtH = (h) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`
+const span = (mins) => (mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`)
+
+function DayStrip() {
+  const { state } = useStore()
+  const [week] = useWeek()
+  useNow(30000)
+  const i = todayIdx()
+  const day = week[i]
+  const d = new Date()
+  const now = d.getHours() + d.getMinutes() / 60
+  const isWeekend = i >= 5
+  const s0 = sessionStart(i)
+  const s1 = s0 + day.plan
+  const active = state.registry.find((p) => state.plan[p.id]?.state === 'active')
+  let msg
+  if (!isWeekend && now >= 9 && now < 17.5) msg = `Office until 17:30. Personal time in ${span(Math.round((17.5 - now) * 60))}.`
+  else if (day.rest || !day.plan) msg = 'Rest day. No project work planned tonight.'
+  else if (now < s0) msg = `${active?.name.replace(' Agent', '') || 'Project'} session at ${fmtH(s0)} for ${day.plan} h. Starts in ${span(Math.round((s0 - now) * 60))}.`
+  else if (now < s1) msg = `Session in progress until ${fmtH(s1)}.`
+  else msg = 'Done for today. Write a handoff note and sleep.'
+  const marks = [6, 9, 12, 15, 18, 21, 24]
+  return (
+    <section className="hud-card daystrip" aria-label="Today">
+      <div className="ds-head">
+        <div>
+          <h3>{d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}</h3>
+          <p className="muted small">{msg}</p>
+        </div>
+        <div className="ds-legend small">
+          <span><i className="ds-sw ds-sw-office" />Office</span>
+          <span><i className="ds-sw ds-sw-session" />Planned session</span>
+          <span><i className="ds-sw ds-sw-sleep" />Sleep</span>
+        </div>
+      </div>
+      <div className="ds-track">
+        {!isWeekend && (
+          <span className="ds-block ds-office" style={{ left: pos(9) + '%', width: pos(17.5) - pos(9) + '%' }}>
+            Office
+          </span>
+        )}
+        {day.plan > 0 && !day.rest && (
+          <span className="ds-block ds-session" style={{ left: pos(s0) + '%', width: pos(s1) - pos(s0) + '%' }}>
+            {day.plan} h
+          </span>
+        )}
+        <span className="ds-block ds-sleep" style={{ left: pos(23.5) + '%', width: 100 - pos(23.5) + '%' }} />
+        <span className="ds-now" style={{ left: pos(now) + '%' }}>
+          <b className="num">{fmtH(now)}</b>
+        </span>
+      </div>
+      <div className="ds-scale">
+        {marks.map((m) => (
+          <span key={m} style={{ left: pos(m) + '%' }} className="num">
+            {String(m % 24).padStart(2, '0')}
+          </span>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -277,6 +344,7 @@ export default function Overview({ onAdd }) {
         <MachineCard />
         <LiveCard />
       </div>
+      <DayStrip />
 
       <section className="projects" aria-label="Projects">
         <div className="toolbar">
@@ -290,7 +358,8 @@ export default function Overview({ onAdd }) {
             ))}
           </div>
           <div className="tools-r">
-            <div className="seg" aria-label="Status filter">
+            <div className="seg has-knob" aria-label="Status filter">
+              <Knob />
               {['all', 'running', 'stopped', 'failed'].map((k) => (
                 <button key={k} className={stf === k ? 'on' : ''} onClick={() => setStf(k)}>
                   {k[0].toUpperCase() + k.slice(1)}

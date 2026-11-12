@@ -4,7 +4,7 @@ import DOMPurify from 'dompurify'
 import { useStore } from './store'
 import { DEMO_ASSETS, defaultReadme } from './readmes'
 import { putBlob, getBlob, delBlob, usage } from './media'
-import { Icon, Button, ago } from './ui'
+import { Icon, Button, Knob, ago } from './ui'
 
 // README text + media list live in localStorage; the media files themselves in IndexedDB.
 // Real app: the agent serves README.md and docs/media/* from the project folder.
@@ -269,7 +269,8 @@ export default function Readme({ p }) {
         {editing ? (
           <div className="rd-edit">
             <div className="rd-tools">
-              <div className="seg rd-pane" role="tablist" aria-label="Editor view">
+              <div className="seg rd-pane has-knob" role="tablist" aria-label="Editor view">
+                <Knob />
                 {['write', 'split', 'preview'].map((k) => (
                   <button key={k} role="tab" aria-selected={pane === k} className={(pane === k ? 'on ' : '') + (k === 'split' ? 'split-only' : '')} onClick={() => setPane(k)}>
                     {k[0].toUpperCase() + k.slice(1)}
