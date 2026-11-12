@@ -56,6 +56,13 @@ function ActiveCard() {
           <span>{pl.blocker}</span>
         </div>
       )}
+      {pl.sessions[0] && (
+        <div className="ac-last">
+          <span>Last session</span>
+          <b className="num">{pl.sessions[0].mins} min</b>
+          <span>{pl.sessions[0].note}</span>
+        </div>
+      )}
     </section>
   )
 }
@@ -96,7 +103,7 @@ function MachineCard() {
       <ul className="legend">
         {on && vramUsers.map((p) => (
           <li key={p.id}>
-            <span className="sw" style={{ background: `hsl(${p.hue} 85% 62%)` }} />
+            <span className="sw" style={{ background: `hsl(${p.hue} 40% 62%)` }} />
             {p.name} {gb(state.runtime[p.id].vram)}
           </li>
         ))}
