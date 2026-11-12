@@ -1,7 +1,7 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useStore, statusOf } from './store'
 import { CATEGORIES, MACHINES, PLAN_STATES } from './data'
-import { Icon, Glyph, Status, Knob, LiveBars, uptime, ago, useNow } from './ui'
+import { Icon, Glyph, Status, Knob, LiveBars, Select, EmptyState, Skeleton, useFlip, uptime, ago, useNow } from './ui'
 import { Actions, go } from './App'
 
 const ORDER = { failed: 0, starting: 1, stopping: 1, running: 2, stopped: 3, offline: 4 }
@@ -77,7 +77,7 @@ function Row({ p, open, toggle }) {
   const pl = state.plan[p.id]
   return (
     <>
-      <tr className={'prow ' + (open ? 'is-open ' : '') + 'st-' + st} onClick={toggle} aria-expanded={open}>
+      <tr data-flip={p.id} className={'prow ' + (open ? 'is-open ' : '') + 'st-' + st} onClick={toggle} aria-expanded={open}>
         <td className="c-chev">
           <Icon name="chev" size={12} className="chev" />
         </td>
@@ -150,7 +150,16 @@ function Tile({ p }) {
 export default function Projects({ onAdd }) {
   const { state } = useStore()
   useNow(1000)
-  const [view, setView] = useState(() => pref('projectos-view', 'list'))
+  const [viewPref, setView] = useState(() => pref('projectos-view', 'list'))
+  const [narrow, setNarrow] = useState(() => matchMedia('(max-width: 700px)').matches)
+  useEffect(() => {
+    const mq = matchMedia('(max-width: 700px)')
+    const f = () => setNarrow(mq.matches)
+    mq.addEventListener('change', f)
+    return () => mq.removeEventListener('change', f)
+  }, [])
+  // Phones always get cards; a wide table can't show its actions there.
+  const view = narrow ? 'grid' : viewPref
   const [cat, setCat] = useState('all')
   const [stf, setStf] = useState('all')
   const [prio, setPrio] = useState('all')
@@ -173,6 +182,8 @@ export default function Projects({ onAdd }) {
     sort === 'name' ? a.name.localeCompare(b.name) : sort === 'priority' ? PRIO[state.plan[a.id].state] - PRIO[state.plan[b.id].state] || a.name.localeCompare(b.name) : ORDER[statusOf(state, a)] - ORDER[statusOf(state, b)] || a.name.localeCompare(b.name)
   )
   const setV = (v) => (setView(v), save('projectos-view', v))
+  const body = useRef(null)
+  useFlip(body, list.map((p) => p.id).join())
   const counts = state.registry.reduce((acc, p) => ((acc[statusOf(state, p)] = (acc[statusOf(state, p)] || 0) + 1), acc), {})
 
   return (
@@ -191,32 +202,9 @@ export default function Projects({ onAdd }) {
           <Icon name="search" />
           <input id="pf-q" type="search" placeholder="Filter projects" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
-        <label className="sel">
-          <span>Category</span>
-          <select id="pf-cat" value={cat} onChange={(e) => setCat(e.target.value)}>
-            <option value="all">All</option>
-            {Object.entries(CATEGORIES).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-        </label>
-        <label className="sel">
-          <span>Priority</span>
-          <select id="pf-prio" value={prio} onChange={(e) => setPrio(e.target.value)}>
-            <option value="all">All</option>
-            {Object.entries(PLAN_STATES).map(([k, v]) => (
-              <option key={k} value={k}>{v.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="sel">
-          <span>Sort</span>
-          <select id="pf-sort" value={sort} onChange={(e) => setSort(e.target.value)}>
-            <option value="status">Status</option>
-            <option value="priority">Priority</option>
-            <option value="name">Name</option>
-          </select>
-        </label>
+        <Select id="pf-cat" label="Category" value={cat} onChange={setCat} options={[['all', 'All'], ...Object.entries(CATEGORIES)]} />
+        <Select id="pf-prio" label="Priority" value={prio} onChange={setPrio} options={[['all', 'All'], ...Object.entries(PLAN_STATES).map(([k, v]) => [k, v.label])]} />
+        <Select id="pf-sort" label="Sort" value={sort} onChange={setSort} options={[['status', 'Status'], ['priority', 'Priority'], ['name', 'Name']]} />
         <div className="seg has-knob" aria-label="Process state">
           <Knob />
           {['all', 'running', 'stopped', 'failed', 'offline'].map((k) => (
@@ -237,11 +225,8 @@ export default function Projects({ onAdd }) {
       </div>
 
       {list.length === 0 ? (
-        <div className="panel empty">
-          <p>No projects match these filters.</p>
-          <button className="link" onClick={() => (setCat('all'), setStf('all'), setPrio('all'), setQ(''))}>
-            Clear filters
-          </button>
+        <div className="panel">
+          <EmptyState icon="search" title="No projects match these filters" action={<button className="btn btn-sm" onClick={() => (setCat('all'), setStf('all'), setPrio('all'), setQ(''))}>Clear filters</button>} />
         </div>
       ) : view === 'list' ? (
         <section className="panel flat-panel plist">
@@ -258,8 +243,16 @@ export default function Projects({ onAdd }) {
                   <th className="r">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {list.map((p) => (
+              <tbody ref={body}>
+                {!state.ready &&
+                  [0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                    <tr key={'sk' + i} className="sk-row">
+                      <td colSpan={7}>
+                        <Skeleton lines={1} h={22} />
+                      </td>
+                    </tr>
+                  ))}
+                {state.ready && list.map((p) => (
                   <Row key={p.id} p={p} open={open === p.id} toggle={() => setOpen(open === p.id ? null : p.id)} />
                 ))}
               </tbody>

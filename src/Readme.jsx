@@ -25,7 +25,7 @@ const kindOf = (type) => (type.startsWith('video/') ? 'video' : type === 'image/
 
 // Markdown -> safe HTML. `![alt](asset:ID)` and links to .mp4/.webm become media tags.
 // Media src is filled in after render (data-asset / data-src) so the sanitizer never sees blob: URLs.
-function render(md, assets) {
+function render(md, assets, base) {
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]))
   const renderer = new marked.Renderer()
   renderer.image = (href, title, text) => {
@@ -37,6 +37,8 @@ function render(md, assets) {
       if (a.kind === 'video') return `<video data-asset="${a.id}" controls playsinline preload="metadata"${cap} aria-label="${alt}"></video>`
       return `<img data-asset="${a.id}" alt="${alt}"${cap} loading="lazy">`
     }
+    // Relative paths in a README served by the agent point at the project's docs/ folder.
+    if (base && href && !/^(https?:|data:|blob:|#|\/)/.test(href)) href = base + href.replace(/^\.?\/?(docs\/)?/, '')
     if (VIDEO_EXT.test(href)) return `<video data-src="${esc(href)}" controls playsinline preload="metadata" aria-label="${alt}"></video>`
     return `<img src="${esc(href)}" alt="${alt}"${cap} loading="lazy">`
   }
@@ -112,10 +114,22 @@ function MediaThumb({ a, url }) {
 }
 
 export default function Readme({ p }) {
-  const { engine } = useStore()
+  const { state, engine } = useStore()
   const [all, setAll] = useState(loadAll)
   const saved = all[p.id]
-  const md = saved?.md ?? defaultReadme(p)
+  const [remote, setRemote] = useState(null)
+  const live = state.mode === 'live' && !p.self
+  useEffect(() => {
+    if (!live || saved) return
+    let ok = true
+    fetch(`/api/projects/${p.id}/readme`, { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.text() : null))
+      .then((t) => ok && setRemote(t))
+      .catch(() => {})
+    return () => { ok = false }
+  }, [live, p.id, !!saved])
+  const md = saved?.md ?? remote ?? defaultReadme(p)
+  const base = live && !saved && remote ? `/api/projects/${p.id}/media/` : null
   const assets = useMemo(() => saved?.assets ?? (DEMO_ASSETS[p.id] || []).map((a) => ({ ...a, kind: 'image', type: 'image/svg+xml' })), [saved, p.id])
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(md)
@@ -133,7 +147,7 @@ export default function Readme({ p }) {
   const curMd = editing ? draft : md
   const curAssets = editing ? draftAssets : assets
   const urls = useMediaUrls(curAssets)
-  const html = useMemo(() => render(curMd, curAssets), [curMd, curAssets])
+  const html = useMemo(() => render(curMd, curAssets, editing ? null : base), [curMd, curAssets, base, editing])
   const toc = useMemo(
     () => marked.lexer(curMd).filter((t) => t.type === 'heading' && t.depth > 1 && t.depth < 4).map((t) => ({ depth: t.depth, text: t.text.replace(/[*_`]/g, ''), id: slug(t.text) })),
     [curMd]

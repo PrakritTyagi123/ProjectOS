@@ -1,6 +1,6 @@
 import { useStore } from './store'
 import { Glyph, Icon, ago } from './ui'
-import { GIT } from './extra'
+import { gitFor } from './extra'
 
 export default function Repos() {
   const { state, engine } = useStore()
@@ -28,7 +28,7 @@ export default function Repos() {
             </thead>
             <tbody>
               {list.map((p) => {
-                const g = GIT[p.id]
+                const g = gitFor(p)
                 const c = g.commits[0]
                 return (
                   <tr key={p.id}>

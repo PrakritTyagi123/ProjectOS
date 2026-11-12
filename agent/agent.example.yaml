@@ -1,0 +1,17 @@
+# Copy to agent.yaml. Paths are relative to this file.
+machine_id: desktop-01
+host: 127.0.0.1          # do not change; cloudflared connects locally
+port: 8765
+registry_path: registry.yaml
+log_dir: logs
+audit_path: logs/audit.jsonl
+secrets_path: secrets.env
+
+# Cloudflare Access (Zero Trust > Settings > Custom pages shows your team domain)
+access_team_domain: YOURTEAM.cloudflareaccess.com
+# Zero Trust > Access > Applications > (agent app) > Overview > Application Audience (AUD) Tag
+access_aud:
+  - PASTE_AUD_TAG_HERE
+
+# true only while testing on this PC without Access. Never leave on.
+dev_allow_local: false

@@ -1,6 +1,6 @@
 import { useStore, statusOf } from './store'
 import { MACHINES } from './data'
-import { Icon, Glyph, Status, LiveBars, uptime, useNow, gb } from './ui'
+import { Icon, Glyph, Status, LiveBars, Num, uptime, useNow, gb } from './ui'
 import { Actions, go } from './App'
 import { SystemPanel } from './Overview'
 
@@ -63,9 +63,9 @@ export default function Runtime() {
                     </td>
                     <td className="r num muted">{on || st === 'starting' ? r.pid : '–'}</td>
                     <td className="r num">{on ? uptime(r.startedAt) : '–'}</td>
-                    <td className="r num">{on ? r.cpu.toFixed(0) + '%' : '–'}</td>
-                    <td className="r num">{on ? gb(r.ram) : '–'}</td>
-                    <td className="r num">{on && p.gpu ? gb(r.vram) : '–'}</td>
+                    <td className="r num">{on ? <><Num value={r.cpu} />%</> : '–'}</td>
+                    <td className="r num">{on ? <><Num value={r.ram} decimals={1} /> GB</> : '–'}</td>
+                    <td className="r num">{on && p.gpu ? <><Num value={r.vram} decimals={1} /> GB</> : '–'}</td>
                     <td className="small muted">{p.restart.split(' ')[0]}</td>
                     <td className="c-spark">
                       <LiveBars data={r.hist.slice(-16)} color="var(--accent)" />

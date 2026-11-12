@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useStore } from './store'
-import { Glyph, ago, clock, useNow } from './ui'
+import { Glyph, Select, ago, clock, useNow } from './ui'
 
 const TYPES = { runtime: 'Runtime', crash: 'Crash', commit: 'Commit', session: 'Work session', milestone: 'Milestone', build: 'Build', training: 'Training', deploy: 'Deploy', access: 'Access', registry: 'Registry' }
 const dayLabel = (t) => {
@@ -36,28 +36,9 @@ export default function ActivityPage() {
         </div>
       </header>
       <div className="filters panel-inset">
-        <label className="sel">
-          <span>Project</span>
-          <select id="ac-proj" value={proj} onChange={(e) => setProj(e.target.value)}>
-            <option value="all">All</option>
-            {state.registry.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
-        <label className="sel">
-          <span>Type</span>
-          <select id="ac-type" value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="all">All</option>
-            {Object.entries(TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-        </label>
-        <label className="sel">
-          <span>Machine</span>
-          <select id="ac-mach" value={mach} onChange={(e) => setMach(e.target.value)}>
-            <option value="all">All</option>
-            <option value="desktop-01">desktop-01</option>
-            <option value="office-ws">office-ws</option>
-          </select>
-        </label>
+        <Select id="ac-proj" label="Project" value={proj} onChange={setProj} options={[['all', 'All'], ...state.registry.map((p) => [p.id, p.name])]} />
+        <Select id="ac-type" label="Type" value={type} onChange={setType} options={[['all', 'All'], ...Object.entries(TYPES)]} />
+        <Select id="ac-mach" label="Machine" value={mach} onChange={setMach} options={[['all', 'All'], 'desktop-01', 'office-ws']} />
         <span className="muted small num">{list.length} events</span>
       </div>
       {groups.map((g) => (

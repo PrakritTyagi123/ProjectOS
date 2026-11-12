@@ -29,7 +29,7 @@ export default function Deploy() {
               </tr>
             </thead>
             <tbody>
-              {state.deploys.map((d) => {
+              {state.deploys.filter((d) => state.registry.some((x) => x.id === d.id)).map((d) => {
                 const p = state.registry.find((x) => x.id === d.id)
                 const st = statusOf(state, p)
                 const [ds, dl] = DEP[d.status]

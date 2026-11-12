@@ -1,3 +1,10 @@
 node_modules
 dist
 dist-single
+agent/.venv
+agent/agent.yaml
+agent/registry.yaml
+agent/secrets.env
+agent/logs
+**/__pycache__
+.pytest_cache

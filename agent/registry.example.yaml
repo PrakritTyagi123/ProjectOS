@@ -1,0 +1,70 @@
+# Copy to registry.yaml. This is the ONLY list of things the agent will run.
+# Every value marked TODO must be checked on your PC before the first start.
+projects:
+  - id: comfyui
+    name: ComfyUI
+    category: ai
+    kind: Python
+    description: Offline image and video pipeline for the Hindi shorts channel.
+    working_directory: 'D:\ComfyUI'                         # TODO: real folder
+    launch:
+      executable: 'D:\ComfyUI\.venv\Scripts\python.exe'     # TODO: real python (portable build: python_embeded\python.exe)
+      args: ['main.py', '--listen', '127.0.0.1', '--port', '8188']
+    network:
+      local_port: 8188
+      health_url: 'http://127.0.0.1:8188/system_stats'
+      frontend_url: 'https://comfy.YOURDOMAIN'               # TODO: tunnel hostname, or remove
+    resources:
+      gpu_required: true
+      exclusive_gpu_profile: true
+      expected_vram_gb: 6.5
+    startup_timeout_s: 180
+    repo: github.com/comfyanonymous/ComfyUI
+    docs_dir: docs
+
+  - id: ai-companion
+    name: AI Companion
+    category: ai
+    kind: Python
+    description: Private character chat with a local LLM.
+    working_directory: 'D:\Projects\AICompanion'            # TODO
+    launch:
+      executable: 'D:\Projects\AICompanion\.venv\Scripts\python.exe'   # TODO
+      args: ['run.py']                                     # TODO: your real entry point
+      env:
+        CHAT_DB: 'D:\Projects\AICompanion\data\chat.sqlite'
+        API_KEY: '${secret:COMPANION_API_KEY}'             # value lives in secrets.env
+    profiles:                                              # optional variants
+      Production:
+        executable: 'D:\Projects\AICompanion\.venv\Scripts\python.exe'
+        args: ['run.py', '--config', 'config\prod.yaml']
+    network:
+      local_port: 8002                                     # TODO: real port
+      health_url: 'http://127.0.0.1:8002/health'           # TODO: real health route (any 200 works)
+      frontend_url: 'https://companion.YOURDOMAIN'
+    resources:
+      gpu_required: true
+      expected_vram_gb: 9.5
+    startup_timeout_s: 240                                  # model loading takes a while
+    repo: github.com/YOU/ai-companion
+
+  # Examples for later. Uncomment when ready.
+  # - id: mall-manager
+  #   name: Mall Manager
+  #   category: games
+  #   kind: Unity Editor
+  #   interactive: true              # opens a window on your desktop; needs you logged in
+  #   working_directory: 'D:\Projects\MallManager'
+  #   launch:
+  #     executable: 'C:\Program Files\Unity\Hub\Editor\6000.0.32f1\Editor\Unity.exe'
+  #     args: ['-projectPath', 'D:\Projects\MallManager']
+  #
+  # - id: nasa-power
+  #   name: NASA POWER Pipeline
+  #   category: tools
+  #   kind: Python job
+  #   type: job                        # runs to completion; exit code is the result
+  #   working_directory: 'D:\Projects\NasaPower'
+  #   launch:
+  #     executable: 'D:\Projects\NasaPower\.venv\Scripts\python.exe'
+  #     args: ['fetch.py']

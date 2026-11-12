@@ -1,7 +1,13 @@
-# ProjectOS dashboard (UI only, demo data)
+# ProjectOS
 
-React 18 + Vite. Everything runs in the browser against a simulated agent, so you can
-host it now and wire the real agent later without redesigning anything.
+Private dashboard to start, stop and watch the backends of my projects on my own PC.
+
+- `src/`: React + Vite dashboard. Runs in **demo mode** (simulated data) when no agent answers
+  at `/api`, and in **live mode** when one does. The sidebar shows which.
+- `agent/`: Python agent for the Windows PC (FastAPI). See `agent/README.md`.
+- `functions/api/[[path]].js`: Cloudflare Pages Function that forwards `/api/*` to the agent
+  through the tunnel with a service token.
+- `DEPLOY.md`: step-by-step setup. `NEXT_STEP.md`: where to pick up.
 
 ## Run locally
 
@@ -53,9 +59,10 @@ your email*. Do this before the real agent is connected.
 | `src/media.js` | IndexedDB storage for uploaded media (demo only). |
 | `src/AddProject.jsx` | Register-a-project flow with validation. |
 
-## Going from demo to real (later, not now)
+## How live mode works
 
-Everything the UI needs comes through `useEngine` in `store.jsx`. Replace:
+On load the dashboard calls `GET /api/agent`. If it answers, `store.jsx` polls `/api/projects` and
+`/api/host/metrics` every 2 s and sends start/stop as POSTs (see `src/live.js`). Endpoints:
 
 - `start(id)` → `POST /api/projects/{id}/start`
 - `stop(id)` → `POST /api/projects/{id}/stop`

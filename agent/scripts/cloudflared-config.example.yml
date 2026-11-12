@@ -1,0 +1,17 @@
+# C:\Users\<you>\.cloudflared\config.yml  (or %ProgramData%\Cloudflare\cloudflared\ when installed as a service)
+tunnel: projectos-home
+credentials-file: C:\Users\YOU\.cloudflared\TUNNEL-ID.json
+
+ingress:
+  # The agent API. Protected by an Access application that only allows the service token.
+  - hostname: agent.YOURDOMAIN
+    service: http://127.0.0.1:8765
+  # Project backends their frontends call. Each gets its own Access application.
+  - hostname: comfy.YOURDOMAIN
+    service: http://127.0.0.1:8188
+  - hostname: companion-api.YOURDOMAIN
+    service: http://127.0.0.1:8002
+    originRequest:
+      connectTimeout: 10s
+      noTLSVerify: false
+  - service: http_status:404

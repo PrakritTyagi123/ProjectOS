@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useWeek, todayIdx } from './week'
 import { useStore } from './store'
 import { PLAN_STATES } from './data'
-import { Icon, Glyph, Button, Num, catVar } from './ui'
+import { Icon, Glyph, Button, Num, Select, catVar } from './ui'
 
 function Card({ p }) {
   const { state, engine } = useStore()
@@ -40,16 +40,10 @@ function Card({ p }) {
           <Icon name="warn" size={12} /> {pl.blocker}
         </p>
       )}
-      <label className="pcard-move small muted">
-        Move to
-        <select id={'mv-' + p.id} value={pl.state} onChange={(e) => move(e.target.value)}>
-          {Object.entries(PLAN_STATES).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="pcard-move small muted">
+        <span>Move to</span>
+        <Select small id={'mv-' + p.id} ariaLabel={`Move ${p.name}`} value={pl.state} onChange={move} options={Object.entries(PLAN_STATES).map(([k, v]) => [k, v.label])} />
+      </div>
     </li>
   )
 }
@@ -179,27 +173,20 @@ function Inbox() {
               <div>{i.text}</div>
               <span className="small muted num">{i.date}</span>
             </div>
-            <select
+            <Select
+              small
               id={'ib-' + i.id}
-              aria-label={`Attach "${i.text}" to a project`}
+              ariaLabel={`Attach "${i.text}" to a project`}
               value=""
-              onChange={(e) => {
-                const id = e.target.value
+              placeholder="Attach to…"
+              onChange={(id) => {
                 const pl = state.plan[id]
                 engine.plan(id, { ideas: [...pl.ideas, i.text] })
                 engine.inbox(state.inbox.filter((x) => x.id !== i.id))
                 engine.toast('Idea moved to that project’s parking lot.')
               }}
-            >
-              <option value="" disabled>
-                Attach to…
-              </option>
-              {parkable.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              options={parkable.map((p) => [p.id, p.name])}
+            />
             <button className="icon-btn" aria-label={`Delete "${i.text}"`} onClick={() => engine.inbox(state.inbox.filter((x) => x.id !== i.id))}>
               <Icon name="x" />
             </button>

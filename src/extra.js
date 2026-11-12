@@ -28,6 +28,7 @@ export function defaultModules(p) {
 
 // ── launch profiles ──────────────────────────────────────────
 export function profilesFor(p) {
+  if (Array.isArray(p.profiles) && p.profiles.length) return p.profiles
   if (p.self || p.kind.startsWith('Unity') || p.job) return ['Default']
   if (p.category === 'ai') return ['Development', 'Production', 'Training', 'Evaluation']
   return ['Development', 'Production']
@@ -151,3 +152,7 @@ export const EXTRA_ACTIVITY = [
   { t: now - 4 * D, who: 'office-ws', machine: 'office-ws', type: 'training', action: 'Evaluation', project: 'forequast', result: 'Finished: 2025 monsoon eval' },
   { t: now - 5 * D, who: 'desktop-01', machine: 'desktop-01', type: 'crash', action: 'Crash', project: 'comfyui', result: 'CUDA out of memory, restarted manually', bad: true },
 ]
+
+export function gitFor(p) {
+  return GIT[p.id] || { remote: p.repo || 'not set', branch: p.branch || '–', dirty: 0, ahead: 0, behind: 0, commits: [] }
+}

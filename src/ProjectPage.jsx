@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, statusOf } from './store'
 import { CATEGORIES, MACHINES, PLAN_STATES } from './data'
-import { Icon, Glyph, StatusPill, PlanChip, Button, Knob, Gauge, Heartbeat, LiveBars, Led, STATUS, Status, clock, ago, uptime, useNow, gb, catVar } from './ui'
+import { Icon, Glyph, StatusPill, PlanChip, Button, Knob, Gauge, Select, Heartbeat, LiveBars, Led, STATUS, Status, clock, ago, uptime, useNow, gb, catVar } from './ui'
 import { Actions, go } from './App'
-import { MODULES, profilesFor, editorFor, GIT, TASK_COLS, TASK_TYPES } from './extra'
+import { MODULES, profilesFor, editorFor, gitFor, TASK_COLS, TASK_TYPES } from './extra'
 import Readme from './Readme'
+import { setLogo, clearLogo, useLogo } from './logos'
 
 const STEPS = [
   ['spawn', 'Spawn', 'Approved executable launched inside a Job Object'],
@@ -111,7 +112,7 @@ function OverviewTab({ p, r, st, setTab }) {
                 <p>{pl.experiment || 'The process exited before its health check answered. Read the last stderr lines.'}</p>
               </div>
               <div className="row-btns">
-                <Actions p={p} open={false} more={false} size="md" />
+                <Actions p={p} open={false} more={false} size="md" primary />
                 <button className="btn" onClick={() => setTab('logs')}>
                   <Icon name="logs" />
                   <span>Full logs</span>
@@ -585,11 +586,7 @@ function TasksTab({ p }) {
                 <li key={x.id} className="task">
                   <span className={'ttype ttype-' + x.type}>{TASK_TYPES[x.type]}</span>
                   <span className="task-t">{x.title}</span>
-                  <select aria-label={`Move ${x.title}`} value={x.col} onChange={(e) => move(x.id, e.target.value)}>
-                    {TASK_COLS.map(([c, l]) => (
-                      <option key={c} value={c}>{l}</option>
-                    ))}
-                  </select>
+                  <Select small ariaLabel={`Move ${x.title}`} value={x.col} onChange={(v) => move(x.id, v)} options={TASK_COLS} />
                 </li>
               ))}
             </ul>
@@ -615,7 +612,7 @@ function TasksTab({ p }) {
 
 function GitTab({ p }) {
   const { engine } = useStore()
-  const g = GIT[p.id]
+  const g = gitFor(p)
   return (
     <div className="tab-grid">
       <section className="panel">
@@ -649,6 +646,7 @@ function GitTab({ p }) {
 
 function ModulesTab({ p }) {
   const { state, engine } = useStore()
+  const logo = useLogo(p.id)
   const on = state.modules[p.id]
   const toggle = (k) => engine.modules(p.id, on.includes(k) ? on.filter((x) => x !== k) : [...on, k])
   return (
@@ -673,6 +671,21 @@ function ModulesTab({ p }) {
             </li>
           ))}
         </ul>
+      </section>
+      <section className="panel">
+        <header className="panel-h"><h3>Project icon</h3></header>
+        <div className="icon-row">
+          <Glyph p={p} size={56} />
+          <div className="row-btns">
+            <label className="btn btn-sm">
+              <Icon name="image" />
+              <span>Upload</span>
+              <input type="file" accept="image/*" hidden onChange={async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) { try { await setLogo(p.id, f); engine.toast('Project icon updated.', 'good') } catch { engine.toast('That image couldn’t be used.', 'bad') } } }} />
+            </label>
+            {logo && <button className="btn btn-sm" onClick={() => clearLogo(p.id)}>Use initials</button>}
+          </div>
+        </div>
+        <p className="small muted">Square-cropped to 128 px and stored in this browser.</p>
       </section>
       <section className="panel">
         <header className="panel-h"><h3>Launch profiles</h3></header>
@@ -722,35 +735,92 @@ export default function ProjectPage({ p, readme }) {
   const errCount = r.logs.filter((l) => l.stream === 'err').length
   const profiles = profilesFor(p)
   const taskCount = state.tasks.filter((x) => x.project === p.id && x.col !== 'done').length
+  // Live mode: pull this project's logs while the page is open.
+  useEffect(() => {
+    if (state.mode !== 'live') return
+    engine.fetchLogs(p.id)
+    const iv = setInterval(() => engine.fetchLogs(p.id), 1500)
+    return () => clearInterval(iv)
+  }, [state.mode, p.id])
+  const [split, setSplitRaw] = useState(() => {
+    try { return localStorage.getItem('projectos-split') === '1' } catch { return false }
+  })
+  const setSplit = (v) => {
+    setSplitRaw(v)
+    try { localStorage.setItem('projectos-split', v ? '1' : '0') } catch {}
+  }
+  const [splitW, setSplitW] = useState(() => {
+    try { return Number(localStorage.getItem('projectos-split-w')) || 60 } catch { return 60 }
+  })
+  const setW = (w) => {
+    const v = Math.max(35, Math.min(78, w))
+    setSplitW(v)
+    try { localStorage.setItem('projectos-split-w', String(v)) } catch {}
+  }
+  const splitRef = useRef(null)
+  const startDrag = (e) => {
+    e.preventDefault()
+    const box = splitRef.current.getBoundingClientRect()
+    const move = (ev) => setW(((ev.clientX - box.left) / box.width) * 100)
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.classList.remove('dragging-split')
+    }
+    document.body.classList.add('dragging-split')
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   return (
     <div className="page">
       <header className={'ws-head ws-' + st}>
-        <Glyph p={p} size={48} />
+        <label className="logo-edit" title="Change project icon">
+          <Glyph p={p} size={52} />
+          <span className="logo-hint"><Icon name="image" size={14} /></span>
+          <input
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files[0]
+              e.target.value = ''
+              if (!f) return
+              try {
+                await setLogo(p.id, f)
+                engine.toast('Project icon updated.', 'good')
+              } catch {
+                engine.toast('That image couldn’t be used. Try a PNG, JPG or SVG.', 'bad')
+              }
+            }}
+          />
+        </label>
         <div className="ws-title">
           <h1>{p.name}</h1>
           <p className="muted">{p.blurb}</p>
           <div className="ws-meta">
             <Status status={st} sub={st === 'running' ? uptime(r.startedAt) : null} />
             <span className={'prio prio-' + pl.state}>{PLAN_STATES[pl.state].label}</span>
-            <span className="tag">{CATEGORIES[p.category]}</span>
-            <span className="tag">{p.kind}</span>
-            <span className="tag">{p.machine}</span>
-            {p.port && <span className="tag num">{p.udp ? 'UDP' : 'port'} {p.port}</span>}
+            <span className="tag-strip">
+              <span>{CATEGORIES[p.category]}</span>
+              <span>{p.kind}</span>
+              <span>{p.machine}</span>
+              {p.port && <span className="num">{p.udp ? 'UDP' : 'port'} {p.port}</span>}
+            </span>
           </div>
         </div>
         <div className="ws-actions">
           {profiles.length > 1 && (
-            <label className="sel">
-              <span>Profile</span>
-              <select id={'prof-' + p.id} value={state.profile[p.id]} onChange={(e) => engine.setProfile(p.id, e.target.value)} disabled={st === 'running' || st === 'starting'}>
-                {profiles.map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-            </label>
+            <div className="seg has-knob prof-seg" role="radiogroup" aria-label="Launch profile">
+              <Knob />
+              {profiles.map((x) => (
+                <button key={x} role="radio" aria-checked={state.profile[p.id] === x} className={state.profile[p.id] === x ? 'on' : ''} disabled={st === 'running' || st === 'starting'} onClick={() => engine.setProfile(p.id, x)} title={st === 'running' ? 'Stop to change profile' : `Start with ${x}`}>
+                  {x}
+                </button>
+              ))}
+            </div>
           )}
-          <Actions p={p} size="md" />
+          <Actions p={p} size="md" primary />
         </div>
         {st === 'starting' && <div className="ph-progress" />}
       </header>
@@ -764,6 +834,7 @@ export default function ProjectPage({ p, readme }) {
         </div>
       )}
 
+      <div className="tab-bar">
       <div className="tabs has-knob" role="tablist">
         <Knob />
         {tabs.map(([k, v]) => (
@@ -774,7 +845,15 @@ export default function ProjectPage({ p, readme }) {
           </button>
         ))}
       </div>
+      {mods.includes('runtime') && tab !== 'logs' && (
+        <button className={'btn btn-sm split-btn ' + (split ? 'is-on' : '')} onClick={() => setSplit(!split)} aria-pressed={split} title="Show logs beside this tab">
+          <Icon name="sidebar" />
+          <span>Logs beside</span>
+        </button>
+      )}
+      </div>
 
+      <div className={'split ' + (split && tab !== 'logs' && mods.includes('runtime') ? 'split-on' : '')} ref={splitRef} style={{ '--split': splitW + '%' }}>
       <div className="tab-body" key={tab}>
         {tab === 'readme' && <Readme p={p} />}
         {tab === 'overview' && <OverviewTab p={p} r={r} st={st} setTab={setTab} />}
@@ -785,6 +864,15 @@ export default function ProjectPage({ p, readme }) {
         {tab === 'plan' && <PlanTab p={p} />}
         {tab === 'models' && <ModelsTab p={p} />}
         {tab === 'modules' && <ModulesTab p={p} />}
+      </div>
+      {split && tab !== 'logs' && mods.includes('runtime') && (
+        <>
+          <div className="splitter" role="separator" aria-orientation="vertical" aria-label="Resize logs" tabIndex={0} onPointerDown={startDrag} onKeyDown={(e) => (e.key === 'ArrowLeft' && setW(splitW - 3), e.key === 'ArrowRight' && setW(splitW + 3))} />
+          <aside className="split-logs">
+            <LogsTab p={p} r={r} initial={st === 'failed' ? 'err' : 'all'} />
+          </aside>
+        </>
+      )}
       </div>
     </div>
   )

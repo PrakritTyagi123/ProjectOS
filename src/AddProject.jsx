@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useStore } from './store'
 import { CATEGORIES } from './data'
-import { Modal, Button, Icon } from './ui'
+import { Modal, Button, Icon, Select } from './ui'
 import { go } from './App'
 
 const TYPES = {
@@ -110,16 +110,10 @@ export default function AddProject({ onClose }) {
           <input id="f-name" value={f.name} onChange={set('name')} />
           <span className="hint">Id: {id || '…'}</span>
         </label>
-        <label>
-          Category
-          <select id="f-cat" value={f.category} onChange={set('category')}>
-            {Object.entries(CATEGORIES).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="form-field">
+          <span>Category</span>
+          <Select id="f-cat" ariaLabel="Category" value={f.category} onChange={(v) => (setF({ ...f, category: v }), setChecks(null))} options={Object.entries(CATEGORIES)} />
+        </div>
         <label className="full">
           Working directory
           <input id="f-cwd" value={f.cwd} onChange={set('cwd')} spellCheck="false" />

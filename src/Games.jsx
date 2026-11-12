@@ -7,7 +7,7 @@ export default function Games() {
   const { state, engine } = useStore()
   const games = state.registry.filter((p) => GAMES[p.id])
   return (
-    <div className="page">
+    <div className="page games">
       <header className="page-head">
         <div>
           <h1>Games</h1>

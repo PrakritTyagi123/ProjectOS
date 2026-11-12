@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useStore } from './store'
-import { Glyph, Icon } from './ui'
+import { Glyph, Icon, Select } from './ui'
 import { TASK_COLS, TASK_TYPES } from './extra'
 
 const WIP = 3
@@ -11,7 +11,8 @@ export default function Tasks() {
   const [title, setTitle] = useState('')
   const [drag, setDrag] = useState(null)
   const [over, setOver] = useState(null)
-  const list = state.tasks.filter((t) => proj === 'all' || t.project === proj)
+  const byIdAll = Object.fromEntries(state.registry.map((p) => [p.id, p]))
+  const list = state.tasks.filter((t) => byIdAll[t.project] && (proj === 'all' || t.project === proj))
   const move = (id, col) => {
     const doing = state.tasks.filter((t) => t.col === 'doing' && t.id !== id).length
     if (col === 'doing' && doing >= WIP) return engine.toast(`Already ${WIP} tasks in progress. Finish one first.`, 'bad')
@@ -27,21 +28,13 @@ export default function Tasks() {
           <p className="muted small">Drag cards between columns. At most {WIP} in progress across all projects.</p>
         </div>
         <div className="head-tools">
-          <label className="sel">
-            <span>Project</span>
-            <select id="tk-proj" value={proj} onChange={(e) => setProj(e.target.value)}>
-              <option value="all">All projects</option>
-              {state.registry.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </label>
+          <Select id="tk-proj" label="Project" value={proj} onChange={setProj} options={[['all', 'All projects'], ...state.registry.map((p) => [p.id, p.name])]} />
           <form
             className="inline-form"
             onSubmit={(e) => {
               e.preventDefault()
               if (!title.trim()) return
-              const pid = proj === 'all' ? active?.id || state.registry[0].id : proj
+              const pid = proj === 'all' ? active?.id || state.registry.find((p) => !p.self)?.id || state.registry[0].id : proj
               engine.tasks([...state.tasks, { id: 't' + Date.now(), project: pid, title: title.trim(), col: 'backlog', type: 'feature', milestone: state.plan[pid].milestone }])
               setTitle('')
               engine.toast(`Added to ${byId[pid].name} backlog.`, 'good')
@@ -84,17 +77,13 @@ export default function Tasks() {
                           <Glyph p={p} size={18} />
                           <span>{p.name}</span>
                         </a>
-                        <select aria-label={`Move ${t.title}`} value={t.col} onChange={(e) => move(t.id, e.target.value)}>
-                          {TASK_COLS.map(([c, l]) => (
-                            <option key={c} value={c}>{l}</option>
-                          ))}
-                        </select>
+                        <Select small ariaLabel={`Move ${t.title}`} value={t.col} onChange={(v) => move(t.id, v)} options={TASK_COLS} />
                       </div>
                       {t.milestone && <span className="small muted">{t.milestone}</span>}
                     </li>
                   )
                 })}
-                {items.length === 0 && <li className="kempty small muted">Drop tasks here</li>}
+                {items.length === 0 && <li className="kempty"><span className="es-icon es-sm"><Icon name="plus" size={14} /></span><span className="small muted">Drop tasks here</span></li>}
               </ul>
             </section>
           )

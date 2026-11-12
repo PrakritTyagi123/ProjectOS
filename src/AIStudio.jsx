@@ -7,7 +7,7 @@ export default function AIStudio() {
   const { state, engine } = useStore()
   useNow(1000)
   const servers = state.registry.filter((p) => p.category === 'ai' || p.id === 'hopper').filter((p) => p.gpu || p.id === 'q-nivaran')
-  const comp = state.registry.find((p) => p.id === 'ai-companion')
+  const comp = state.registry.find((p) => p.id === 'ai-companion' && p.models)
   const sel = state.plan['ai-companion']?.selectedModel
   const byId = Object.fromEntries(state.registry.map((p) => [p.id, p]))
   const jobAct = (j) => {
@@ -49,7 +49,7 @@ export default function AIStudio() {
       </section>
 
       <div className="grid-2">
-        <section className="panel flat-panel">
+        {comp && <section className="panel flat-panel">
           <header className="panel-h">
             <h2>Local models</h2>
             <a href="#project-ai-companion" className="small">AI Companion</a>
@@ -67,7 +67,7 @@ export default function AIStudio() {
               ))}
             </tbody>
           </table></div>
-        </section>
+        </section>}
         <section className="panel flat-panel">
           <header className="panel-h">
             <h2>ComfyUI workflows</h2>
@@ -93,7 +93,7 @@ export default function AIStudio() {
           <span className="muted small">Training, evaluation and experiments. Long jobs pause instead of fighting a chat model for VRAM.</span>
         </header>
         <ul className="jobs">
-          {state.jobs.map((j) => {
+          {state.jobs.filter((j) => byId[j.project]).map((j) => {
             const p = byId[j.project]
             return (
               <li key={j.id}>

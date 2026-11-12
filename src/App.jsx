@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { flushSync } from 'react-dom'
 import { useStore, statusOf } from './store'
 import { MACHINES } from './data'
-import { Icon, Glyph, Button, Modal, Led, Knob, Menu, ago, useNow, uptime } from './ui'
+import { Icon, Glyph, Button, Modal, Led, Knob, Menu, EmptyState, ago, useNow, uptime } from './ui'
 import Overview from './Overview'
 import Projects from './Projects'
 import ProjectPage from './ProjectPage'
@@ -99,7 +99,7 @@ export function ThemeSwitch() {
 }
 
 // ── project actions: Start / Stop / Open / More ─────────────
-export function Actions({ p, size = 'sm', more = true, open = true }) {
+export function Actions({ p, size = 'sm', more = true, open = true, primary: emphasise = false }) {
   const { state, engine } = useStore()
   const { requestStart } = useUi()
   const st = statusOf(state, p)
@@ -130,7 +130,7 @@ export function Actions({ p, size = 'sm', more = true, open = true }) {
     )
   else
     primary = (
-      <button className={'btn btn-primary' + sm} disabled={st === 'offline'} title={st === 'offline' ? `${MACHINES[p.machine].label} is offline` : ''} onClick={() => requestStart(p.id)}>
+      <button className={(emphasise ? 'btn btn-primary' : 'btn btn-go') + sm} disabled={st === 'offline'} title={st === 'offline' ? `${MACHINES[p.machine].label} is offline` : ''} onClick={() => requestStart(p.id)}>
         <Icon name={st === 'failed' ? 'restart' : 'play'} />
         <span>{p.job ? 'Run' : st === 'failed' ? 'Retry' : 'Start'}</span>
       </button>
@@ -308,7 +308,7 @@ function Sidebar({ route, collapsed, setCollapsed, drawer, setDrawer }) {
           <Led status={desk ? 'running' : 'offline'} />
           <span className="sb-label">
             <b>desktop-01</b>
-            <span>{desk ? `Agent online, up ${uptime(state.runtime.projectos.startedAt)}` : `Offline, seen ${ago(state.lastSeen)}`}</span>
+            <span>{state.mode === 'demo' ? 'Demo data' : state.mode === 'detecting' ? 'Connecting…' : desk ? `Live, up ${uptime(state.runtime.projectos?.startedAt || Date.now())}` : `Offline, seen ${ago(state.lastSeen)}`}</span>
           </span>
         </a>
       </div>
@@ -383,7 +383,152 @@ function Jump() {
   )
 }
 
-function Toolbar({ route, onAdd, onMenu }) {
+// ── command palette (Ctrl/Cmd+K) ─────────────────────────────
+function setThemeFromAnywhere(mode) {
+  applyTheme(mode)
+  try { localStorage.setItem(THEME_KEY, mode) } catch {}
+  window.dispatchEvent(new Event('projectos-theme'))
+}
+
+function Palette({ onClose }) {
+  const { state, engine } = useStore()
+  const ui = useUi()
+  const [q, setQ] = useState('')
+  const [hi, setHi] = useState(0)
+  const listRef = useRef(null)
+  const items = []
+  NAV.forEach(([id, ic, label]) => items.push({ group: 'Go to', icon: ic, label, run: () => go(id) }))
+  state.registry.forEach((p) => {
+    const st = statusOf(state, p)
+    items.push({ group: 'Projects', glyph: p, label: p.name, hint: p.kind, status: st, run: () => go('project-' + p.id) })
+    if (!p.self && ['stopped', 'failed'].includes(st)) items.push({ group: 'Actions', icon: 'play', label: `Start ${p.name}`, run: () => ui.requestStart(p.id) })
+    if (!p.self && st === 'running') items.push({ group: 'Actions', icon: 'stop', label: `Stop ${p.name}`, run: () => engine.stop(p.id) })
+    if (st === 'running' && p.frontend) items.push({ group: 'Actions', icon: 'open', label: `Open ${p.name} app`, run: () => window.open(p.frontend, '_blank', 'noopener') })
+    items.push({ group: 'Actions', icon: 'doc', label: `${p.name} README`, run: () => go('readme-' + p.id) })
+  })
+  items.push(
+    { group: 'Commands', icon: 'plus', label: 'Add project', run: ui.openAdd },
+    { group: 'Commands', icon: 'sun', label: 'Theme: light', run: () => setThemeFromAnywhere('light') },
+    { group: 'Commands', icon: 'moon', label: 'Theme: dark', run: () => setThemeFromAnywhere('dark') },
+    { group: 'Commands', icon: 'auto', label: 'Theme: match system', run: () => setThemeFromAnywhere('system') },
+    { group: 'Commands', icon: 'sidebar', label: ui.collapsed ? 'Expand sidebar' : 'Collapse sidebar', run: () => ui.setCollapsed(!ui.collapsed) },
+    { group: 'Commands', icon: 'rows', label: ui.density === 'compact' ? 'Comfortable density' : 'Compact density', run: () => ui.setDensity(ui.density === 'compact' ? 'comfortable' : 'compact') },
+    { group: 'Commands', icon: 'moon', label: state.machines['desktop-01'] ? 'Simulate PC asleep' : 'Simulate PC awake', run: () => engine.setMachine('desktop-01', !state.machines['desktop-01']) }
+  )
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean)
+  const shown = (words.length ? items.filter((it) => words.every((w) => (it.label + ' ' + it.group + ' ' + (it.hint || '')).toLowerCase().includes(w))) : items.filter((it) => it.group !== 'Actions')).slice(0, 40)
+  useEffect(() => setHi(0), [q])
+  useEffect(() => {
+    listRef.current?.querySelector('.hi')?.scrollIntoView({ block: 'nearest' })
+  }, [hi])
+  const run = (it) => {
+    onClose()
+    setTimeout(it.run, 0)
+  }
+  let lastGroup = null
+  return (
+    <div className="scrim pal-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+        <label className="search pal-search">
+          <Icon name="search" />
+          <input
+            autoFocus
+            id="palette"
+            placeholder="Search projects, pages and commands"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown') (e.preventDefault(), setHi(Math.min(shown.length - 1, hi + 1)))
+              if (e.key === 'ArrowUp') (e.preventDefault(), setHi(Math.max(0, hi - 1)))
+              if (e.key === 'Enter' && shown[hi]) run(shown[hi])
+              if (e.key === 'Escape') onClose()
+            }}
+            autoComplete="off"
+          />
+          <kbd>Esc</kbd>
+        </label>
+        <ul className="pal-list" ref={listRef} role="listbox">
+          {shown.map((it, i) => {
+            const head = it.group !== lastGroup ? it.group : null
+            lastGroup = it.group
+            return (
+              <li key={i} role="option" aria-selected={i === hi}>
+                {head && <div className="pal-group">{head}</div>}
+                <button className={i === hi ? 'hi' : ''} onMouseEnter={() => setHi(i)} onClick={() => run(it)}>
+                  {it.glyph ? <Glyph p={it.glyph} size={22} /> : <span className="pal-ic"><Icon name={it.icon} /></span>}
+                  <span className="pal-label">{it.label}</span>
+                  {it.status && <Led status={it.status} />}
+                  {it.hint && <span className="small muted">{it.hint}</span>}
+                </button>
+              </li>
+            )
+          })}
+          {shown.length === 0 && <li className="pal-empty muted">No matches for “{q}”.</li>}
+        </ul>
+        <div className="pal-foot small muted">
+          <span><kbd>↑</kbd> <kbd>↓</kbd> move</span>
+          <span><kbd>Enter</kbd> run</span>
+          <span><kbd>Ctrl</kbd> <kbd>K</kbd> open anywhere</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── notification centre ──────────────────────────────────────
+function Bell() {
+  const { state, engine } = useStore()
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const unread = state.notes.filter((n) => !n.read).length
+  useEffect(() => {
+    if (!open) return
+    const off = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false)
+    const key = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('pointerdown', off)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('pointerdown', off)
+      document.removeEventListener('keydown', key)
+    }
+  }, [open])
+  return (
+    <div className="bell" ref={ref}>
+      <button className="btn btn-icon bell-btn" aria-label={`Notifications, ${unread} unread`} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name="bell" />
+        {unread > 0 && <span className="bell-n num">{unread}</span>}
+      </button>
+      {open && (
+        <div className="bell-pop" role="dialog" aria-label="Notifications">
+          <div className="bell-h">
+            <b>Notifications</b>
+            <div className="actions">
+              <button className="link small" onClick={engine.readNotes} disabled={!unread}>Mark all read</button>
+              <button className="link small" onClick={engine.clearNotes}>Clear</button>
+            </div>
+          </div>
+          {state.notes.length ? (
+            <ul className="bell-list">
+              {state.notes.map((n) => (
+                <li key={n.id} className={(n.read ? '' : 'unread ') + 'note-' + n.tone}>
+                  <span className="note-lamp" />
+                  <div>
+                    <span>{n.text}</span>
+                    <span className="small muted">{ago(n.t)}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState icon="bell" title="No notifications" text="Failures and finished jobs show up here." />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Toolbar({ route, onAdd, onMenu, onPalette }) {
   const { state } = useStore()
   const sec = section(route)
   const p = (route.startsWith('project-') || route.startsWith('readme-')) && state.registry.find((x) => x.id === route.replace(/^(project|readme)-/, ''))
@@ -405,6 +550,10 @@ function Toolbar({ route, onAdd, onMenu }) {
       </nav>
       <div className="tb-right">
         <Jump />
+        <button className="btn btn-icon pal-btn" onClick={onPalette} aria-label="Command palette" title="Command palette (Ctrl+K)">
+          <Icon name="bolt" />
+        </button>
+        <Bell />
         <ThemeSwitch />
         <Button icon="plus" variant="primary" onClick={onAdd}>
           <span className="hide-sm">Add project</span>
@@ -422,6 +571,19 @@ export default function App() {
   const [collapsed, setCollapsedRaw] = useState(() => store.get('projectos-sidebar', false))
   const [drawer, setDrawer] = useState(false)
   const setCollapsed = (v) => (setCollapsedRaw(v), store.set('projectos-sidebar', v))
+  const [palette, setPalette] = useState(false)
+  const [density, setDensityRaw] = useState(() => store.get('projectos-density', 'comfortable'))
+  const setDensity = (v) => (setDensityRaw(v), store.set('projectos-density', v))
+  useEffect(() => {
+    const k = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPalette((x) => !x)
+      }
+    }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [])
 
   const requestStart = (id, open) => {
     const conflict = engine.vramConflict(id)
@@ -450,12 +612,12 @@ export default function App() {
 
   const desk = state.machines['desktop-01']
   return (
-    <UiCtx.Provider value={{ requestStart, openAdd: () => setAdding(true) }}>
-      <div className={'shell ' + (collapsed ? 'is-collapsed' : '')}>
+    <UiCtx.Provider value={{ requestStart, openAdd: () => setAdding(true), collapsed, setCollapsed, density, setDensity }}>
+      <div className={'shell ' + (collapsed ? 'is-collapsed ' : '') + 'density-' + density}>
         <Sidebar route={route} collapsed={collapsed && !drawer} setCollapsed={setCollapsed} drawer={drawer} setDrawer={setDrawer} />
         {drawer && <div className="sb-scrim" onClick={() => setDrawer(false)} />}
         <div className="ws">
-          <Toolbar route={route} onAdd={() => setAdding(true)} onMenu={() => setDrawer(true)} />
+          <Toolbar route={route} onAdd={() => setAdding(true)} onMenu={() => setDrawer(true)} onPalette={() => setPalette(true)} />
           <main className="main">
             {!desk && (
               <div className="banner banner-bad" role="alert">
@@ -476,6 +638,7 @@ export default function App() {
       </div>
       {adding && <AddProject onClose={() => setAdding(false)} />}
       {pending && <ConflictModal pending={pending} onClose={() => setPending(null)} />}
+      {palette && <Palette onClose={() => setPalette(false)} />}
       <Toast />
     </UiCtx.Provider>
   )

@@ -3,6 +3,7 @@
 // GET /api/host/metrics and GET /api/projects.
 import { createContext, useContext, useEffect, useReducer, useRef, useMemo } from 'react'
 import { PROJECTS, INITIAL_PLAN, INITIAL_INBOX, MACHINES } from './data'
+import { api, detectAgent, toUiProject, agentProject, toUiRuntime, toUiActivity } from './live'
 import { INITIAL_TASKS, INITIAL_DEPLOYS, INITIAL_JOBS, EXTRA_ACTIVITY, defaultModules, profilesFor } from './extra'
 
 const MAX_LOG = 400
@@ -108,6 +109,15 @@ function init() {
     jobs: INITIAL_JOBS,
     hist: { cpu: Array.from({ length: HIST }, () => rnd(14, 26)), gpu: Array.from({ length: HIST }, () => rnd(20, 45)) },
     toast: null,
+    notes: [
+      { id: 1, t: Date.now() - 21 * 3600000, text: 'Q-NIVARAN failed to start: exit code 1.', tone: 'bad', read: false },
+      { id: 2, t: Date.now() - 50 * 3600000, text: 'Jewellery Store deployment failed: VITE_MEDUSA_URL missing.', tone: 'bad', read: false },
+      { id: 3, t: Date.now() - 9 * 60000, text: 'Hopper is ready.', tone: 'good', read: true },
+    ],
+    ready: false,
+    mode: 'detecting',
+    agent: null,
+    host: null,
   }
 }
 
@@ -181,7 +191,49 @@ function reducer(s, a) {
         runtime: { ...s.runtime, [a.project.id]: { status: 'stopped', hist: Array(30).fill(0), logs: [line('agent', 'registered from dashboard (demo)')], cpu: 0, ram: 0, vram: 0 } },
         plan: { ...s.plan, [a.project.id]: { state: 'parked', milestone: 'Define first release', dod: [], next: 'Write the definition of done.', blocker: '', experiment: '', resume: '', ideas: [], sessions: [] } },
       }
+    case 'READY':
+      return { ...s, ready: true }
+    case 'MODE':
+      return { ...s, mode: a.mode }
+    case 'LIVE_INIT': {
+      const registry = [agentProject(a.agent), ...a.projects.map(toUiProject)]
+      const runtime = {}
+      const plan = { ...s.plan }
+      const modules = { ...s.modules }
+      const profile = { ...s.profile }
+      for (const p of a.projects) {
+        runtime[p.id] = toUiRuntime(p.runtime, s.runtime[p.id] && s.mode === 'live' ? s.runtime[p.id] : {})
+        if (!plan[p.id]) plan[p.id] = { state: 'parked', milestone: 'Define the next release', dod: [], next: 'Write the definition of done.', blocker: '', experiment: '', resume: '', ideas: [], sessions: [] }
+        if (!modules[p.id]) modules[p.id] = ['runtime', 'docs', 'tasks', 'git', ...(p.frontend ? ['deploy'] : [])]
+        if (!profile[p.id] || !(p.profiles || []).includes(profile[p.id])) profile[p.id] = (p.profiles || ['Default'])[0]
+      }
+      runtime.projectos = { status: 'running', startedAt: a.agent.startedAt, logs: [], hist: Array(30).fill(0), cpu: 0, ram: 0, vram: 0, health: { ok: true, ms: 0, at: Date.now() } }
+      if (!plan.projectos) plan.projectos = s.plan.projectos
+      return { ...s, mode: 'live', ready: true, agent: a.agent, registry, runtime, plan, modules, profile, machines: { ...s.machines, 'desktop-01': true }, activity: a.activity ? toUiActivity(a.activity) : s.activity, lastSeen: Date.now() }
+    }
+    case 'SYNC': {
+      const runtime = { ...s.runtime }
+      let registry = s.registry
+      const known = new Set(s.registry.map((p) => p.id))
+      const fresh = a.projects.filter((p) => !known.has(p.id))
+      if (fresh.length) registry = [...s.registry, ...fresh.map(toUiProject)]
+      for (const p of a.projects) runtime[p.id] = toUiRuntime(p.runtime, runtime[p.id])
+      const h = a.host
+      const hist = h ? { cpu: [...s.hist.cpu.slice(1), h.cpu], gpu: [...s.hist.gpu.slice(1), h.gpu?.util ?? 0] } : s.hist
+      return { ...s, registry, runtime, host: h || s.host, hist, machines: { ...s.machines, 'desktop-01': true }, lastSeen: Date.now(), activity: a.activity ? toUiActivity(a.activity) : s.activity }
+    }
+    case 'LOGS_SET': {
+      const cur = s.runtime[a.id]
+      if (!cur) return s
+      return { ...s, runtime: { ...s.runtime, [a.id]: { ...cur, logs: a.lines } } }
+    }
+    case 'NOTES_READ':
+      return { ...s, notes: s.notes.map((n) => ({ ...n, read: true })) }
+    case 'NOTES_CLEAR':
+      return { ...s, notes: [] }
     case 'TOAST':
+      if (a.toast && a.toast.tone !== 'info' && a.toast.tone)
+        return { ...s, toast: { ...a.toast, id: Date.now() }, notes: [{ id: Date.now() + Math.random(), t: Date.now(), text: a.toast.text, tone: a.toast.tone, read: false }, ...s.notes].slice(0, 60) }
       return { ...s, toast: a.toast ? { ...a.toast, id: Date.now() } : null }
     case 'RESET':
       return init()
@@ -199,8 +251,57 @@ export function StoreProvider({ children }) {
   ref.current = state
   const timers = useRef({})
 
+  // Find out whether a real agent is behind /api. If not, run the demo simulation.
+  useEffect(() => {
+    let alive = true
+    let poll
+    let n = 0
+    const sync = async () => {
+      try {
+        const [pr, host] = await Promise.all([api('/api/projects'), api('/api/host/metrics')])
+        const act = n++ % 5 === 0 ? (await api('/api/activity?n=120')).items : null
+        if (!alive) return
+        const prev = ref.current.runtime
+        for (const p of pr.projects) {
+          const was = prev[p.id]?.status
+          const now = p.runtime.status
+          if (was === 'starting' && now === 'running') dispatch({ type: 'TOAST', toast: { text: `${p.name} is ready.`, tone: 'good' } })
+          if (was === 'starting' && now === 'failed') dispatch({ type: 'TOAST', toast: { text: `${p.name} failed to start. See logs.`, tone: 'bad' } })
+          if (was === 'running' && now === 'failed') dispatch({ type: 'TOAST', toast: { text: `${p.name} crashed: ${p.runtime.error || ''}`, tone: 'bad' } })
+        }
+        dispatch({ type: 'SYNC', projects: pr.projects, host, activity: act })
+      } catch (e) {
+        if (alive) dispatch({ type: 'MACHINE', id: 'desktop-01', online: false })
+      }
+    }
+    ;(async () => {
+      const info = await detectAgent()
+      if (!alive) return
+      if (!info) {
+        dispatch({ type: 'MODE', mode: 'demo' })
+        setTimeout(() => alive && dispatch({ type: 'READY' }), 700)
+        return
+      }
+      try {
+        const [agent, pr, act] = await Promise.all([api('/api/agent'), api('/api/projects'), api('/api/activity?n=120')])
+        if (!alive) return
+        dispatch({ type: 'LIVE_INIT', agent, projects: pr.projects, activity: act.items })
+      } catch {
+        dispatch({ type: 'MODE', mode: 'live' })
+        dispatch({ type: 'READY' })
+        dispatch({ type: 'MACHINE', id: 'desktop-01', online: false })
+      }
+      poll = setInterval(sync, 2000)
+    })()
+    return () => {
+      alive = false
+      clearInterval(poll)
+    }
+  }, [])
+
   useEffect(() => {
     const iv = setInterval(() => {
+      if (ref.current.mode === 'live') return
       dispatch({ type: 'TICK' })
       // occasional traffic in logs
       const s = ref.current
@@ -233,7 +334,35 @@ export function StoreProvider({ children }) {
     const toast = (text, tone = 'info') => dispatch({ type: 'TOAST', toast: { text, tone } })
     const online = (p) => ref.current.machines[p.machine]
 
+    const live = () => ref.current.mode === 'live'
+    async function liveAction(id, verb, body) {
+      const p = get(id)
+      if (verb === 'start') dispatch({ type: 'RT', id, patch: { status: 'starting', phase: 'spawn', startedAt: Date.now(), error: null } })
+      if (verb === 'stop') dispatch({ type: 'RT', id, patch: { status: 'stopping' } })
+      try {
+        await api(`/api/projects/${id}/${verb}`, { method: 'POST', body: JSON.stringify(body || {}) })
+        if (verb === 'stop') toast(`${p.name} stopped.`)
+        if (verb === 'start') fetchLogs(id)
+      } catch (e) {
+        toast(`${p.name}: ${e.message}`, 'bad')
+        dispatch({ type: 'RT', id, patch: { status: verb === 'stop' ? 'running' : 'stopped' } })
+      }
+    }
+    async function fetchLogs(id) {
+      if (!live() || id === 'projectos') return
+      try {
+        const r = await api(`/api/projects/${id}/logs?tail=400`)
+        dispatch({ type: 'LOGS_SET', id, lines: r.lines })
+      } catch {}
+    }
+
     function start(id, { open } = {}) {
+      if (live()) {
+        const prof = ref.current.profile?.[id]
+        liveAction(id, 'start', prof && prof !== 'Default' ? { profile: prof } : {})
+        if (open && get(id)?.frontend) toast('Starting. Use Open once it shows Running.')
+        return
+      }
       const p = get(id)
       if (!online(p)) return toast(`${MACHINES[p.machine].label} is offline. Nothing was started.`, 'bad')
       clear(id)
@@ -276,6 +405,10 @@ export function StoreProvider({ children }) {
     }
 
     function stop(id, { quiet, then } = {}) {
+      if (live()) {
+        liveAction(id, 'stop').then(() => then && then())
+        return
+      }
       const p = get(id)
       if (p.self) return toast('The agent is managed by Windows Task Scheduler and can’t stop itself from here.', 'bad')
       if (!online(p)) return toast(`${MACHINES[p.machine].label} is offline.`, 'bad')
@@ -295,6 +428,7 @@ export function StoreProvider({ children }) {
     }
 
     function restart(id) {
+      if (live()) return liveAction(id, 'restart')
       dispatch({ type: 'ACT', entry: { action: 'Restart', project: id, result: 'Requested' } })
       stop(id, { quiet: true, then: () => start(id) })
     }
@@ -331,7 +465,9 @@ export function StoreProvider({ children }) {
       restart,
       vramConflict,
       toast,
+      fetchLogs,
       setMachine: (id, on) => {
+        if (live()) return toast('Sleep simulation is only for demo mode. Live state comes from the agent.')
         dispatch({ type: 'MACHINE', id, online: on })
         toast(on ? 'Agent back online.' : 'Agent offline. Controls are disabled until it reconnects.', on ? 'good' : 'bad')
       },
@@ -365,6 +501,8 @@ export function StoreProvider({ children }) {
         dispatch({ type: 'ACT', entry: { action: 'Register', project: project.id, result: 'Added to registry (demo)' } })
       },
       clearToast: () => dispatch({ type: 'TOAST', toast: null }),
+      readNotes: () => dispatch({ type: 'NOTES_READ' }),
+      clearNotes: () => dispatch({ type: 'NOTES_CLEAR' }),
       reset: () => {
         Object.keys(timers.current).forEach(clear)
         try { localStorage.removeItem(STORE_KEY) } catch {}

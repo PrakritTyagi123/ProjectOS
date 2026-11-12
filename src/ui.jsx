@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { PLAN_STATES } from './data'
+import { useLogo } from './logos'
 
 // ── formatting ───────────────────────────────────────────────
 export const clock = (t) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -51,6 +52,7 @@ const paths = {
   bolt: 'M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z',
   menu: 'M2.5 4h11M2.5 8h11M2.5 12h11',
   more: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
+  bell: 'M4 11.5V7a4 4 0 0 1 8 0v4.5l1 1.5H3zM6.5 13.5a1.5 1.5 0 0 0 3 0',
   git: 'M5 3v10M5 13a1.5 1.5 0 1 0 0-.01M11 5.5a1.5 1.5 0 1 0 0-.01M11 7c0 2.5-6 2-6 4.5',
   cloud: 'M4.5 12.5h7a3 3 0 0 0 .3-6 4 4 0 0 0-7.6 1.1A2.5 2.5 0 0 0 4.5 12.5z',
   game: 'M4 5.5h8a2.5 2.5 0 0 1 2.4 3.2l-.8 2.8a1.5 1.5 0 0 1-2.6.5L9.6 10.5H6.4L5 12a1.5 1.5 0 0 1-2.6-.5l-.8-2.8A2.5 2.5 0 0 1 4 5.5zM5 7.5v2M4 8.5h2M10.5 8h.01M11.8 9.2h.01',
@@ -104,6 +106,7 @@ export function PlanChip({ state }) {
 }
 
 export function Glyph({ p, size = 36 }) {
+  const logo = useLogo(p.id)
   const initials = p.name
     .replace(/[^A-Za-z0-9 -]/g, '')
     .split(/[\s-]+/)
@@ -113,8 +116,8 @@ export function Glyph({ p, size = 36 }) {
     .join('')
     .toUpperCase()
   return (
-    <span className="glyph" style={{ '--h': p.hue, width: size, height: size, fontSize: size * 0.36 }} aria-hidden="true">
-      {initials}
+    <span className={'glyph' + (logo ? ' glyph-img' : '')} style={{ '--h': p.hue, width: size, height: size, fontSize: size * 0.36 }} aria-hidden="true">
+      {logo ? <img src={logo} alt="" /> : initials}
     </span>
   )
 }
@@ -369,5 +372,153 @@ export function Menu({ label = 'More actions', items, align = 'right' }) {
         </div>
       )}
     </div>
+  )
+}
+
+// Neumorphic select: raised button + raised listbox. Keyboard: arrows, Enter, Escape, type-ahead.
+export function Select({ id, value, onChange, options, label, small, disabled, ariaLabel, placeholder }) {
+  const opts = options.map((o) => (Array.isArray(o) ? { value: o[0], label: o[1] } : typeof o === 'string' ? { value: o, label: o } : o))
+  const [open, setOpen] = useState(false)
+  const [hi, setHi] = useState(0)
+  const ref = useRef(null)
+  const cur = opts.find((o) => o.value === value)
+  useEffect(() => {
+    if (!open) return
+    setHi(Math.max(0, opts.findIndex((o) => o.value === value)))
+    const off = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false)
+    document.addEventListener('pointerdown', off)
+    return () => document.removeEventListener('pointerdown', off)
+  }, [open])
+  const pick = (o) => {
+    if (o.disabled) return
+    setOpen(false)
+    if (o.value !== value) onChange(o.value)
+  }
+  const key = (e) => {
+    if (e.key === 'ArrowDown') (e.preventDefault(), open ? setHi(Math.min(opts.length - 1, hi + 1)) : setOpen(true))
+    else if (e.key === 'ArrowUp') (e.preventDefault(), open ? setHi(Math.max(0, hi - 1)) : setOpen(true))
+    else if (e.key === 'Enter' || e.key === ' ') (e.preventDefault(), open ? pick(opts[hi]) : setOpen(true))
+    else if (e.key === 'Escape') setOpen(false)
+    else if (e.key.length === 1) {
+      const i = opts.findIndex((o) => String(o.label).toLowerCase().startsWith(e.key.toLowerCase()))
+      if (i >= 0) setHi(i)
+    }
+  }
+  const btn = (
+    <div className={'nsel ' + (small ? 'nsel-sm ' : '') + (open ? 'is-open' : '')} ref={ref} onClick={(e) => e.stopPropagation()}>
+      <button id={id} type="button" className="nsel-btn" disabled={disabled} aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel || label} onClick={() => setOpen(!open)} onKeyDown={key}>
+        <span className="nsel-v">{cur ? cur.label : placeholder || 'Choose'}</span>
+        <Icon name="chevd" size={12} />
+      </button>
+      {open && (
+        <ul className="nsel-pop" role="listbox" aria-label={ariaLabel || label}>
+          {opts.map((o, i) => (
+            <li
+              key={String(o.value)}
+              role="option"
+              aria-selected={o.value === value}
+              aria-disabled={o.disabled || undefined}
+              className={(i === hi ? 'hi ' : '') + (o.value === value ? 'cur ' : '') + (o.disabled ? 'dis' : '')}
+              onMouseEnter={() => setHi(i)}
+              onClick={() => pick(o)}
+            >
+              <span>{o.label}</span>
+              {o.value === value && <Icon name="check" size={12} />}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+  if (!label) return btn
+  return (
+    <div className="sel">
+      <span>{label}</span>
+      {btn}
+    </div>
+  )
+}
+
+// Empty state: icon well, one line, one action.
+export function EmptyState({ icon = 'check', title, text, action }) {
+  return (
+    <div className="empty-state">
+      <span className="es-icon">
+        <Icon name={icon} size={20} />
+      </span>
+      <div>
+        <b>{title}</b>
+        {text && <p className="small muted">{text}</p>}
+      </div>
+      {action}
+    </div>
+  )
+}
+
+// Skeleton blocks shown while the agent answers.
+export function Skeleton({ lines = 3, h = 14, block }) {
+  if (block) return <div className="sk sk-block" style={{ height: block }} />
+  return (
+    <div className="sk-lines">
+      {Array.from({ length: lines }, (_, i) => (
+        <div key={i} className="sk" style={{ height: h, width: `${90 - ((i * 17) % 40)}%` }} />
+      ))}
+    </div>
+  )
+}
+
+// FLIP: children with data-flip keys slide to their new position after a re-order.
+export function useFlip(ref, key) {
+  const prev = useRef(new Map())
+  useLayoutEffect(() => {
+    const root = ref.current
+    if (!root) return
+    const els = root.querySelectorAll('[data-flip]')
+    const next = new Map()
+    els.forEach((el) => {
+      const r = el.getBoundingClientRect()
+      next.set(el.dataset.flip, r.top)
+      const old = prev.current.get(el.dataset.flip)
+      if (old != null && Math.abs(old - r.top) > 2 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        el.animate([{ transform: `translateY(${old - r.top}px)` }, { transform: 'translateY(0)' }], { duration: 450, easing: 'cubic-bezier(.3,.8,.3,1)' })
+      }
+    })
+    prev.current = next
+  }, [key])
+}
+
+// Line chart with axis, grid and end marker. data: [{t, v}] ; max fixed.
+export function HistoryChart({ series, max = 100, unit = '%', height = 240, fmtT }) {
+  const W = 1000
+  const H = height
+  const pad = { l: 34, r: 12, t: 12, b: 24 }
+  const n = series[0].data.length
+  const x = (i) => pad.l + (i / (n - 1)) * (W - pad.l - pad.r)
+  const y = (v) => pad.t + (1 - Math.min(v, max) / max) * (H - pad.t - pad.b)
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((k) => k * max)
+  const xt = [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4), n - 1]
+  return (
+    <svg className="hchart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={series.map((s) => s.name).join(', ') + ' history'}>
+      {ticks.map((t) => (
+        <g key={t}>
+          <line x1={pad.l} x2={W - pad.r} y1={y(t)} y2={y(t)} className="hc-grid" />
+          <text x={pad.l - 6} y={y(t) + 3} textAnchor="end" className="hc-tx">{Math.round(t)}{unit === '%' ? '' : ''}</text>
+        </g>
+      ))}
+      {xt.map((i) => (
+        <text key={i} x={x(i)} y={H - 6} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} className="hc-tx">{fmtT(series[0].data[i].t)}</text>
+      ))}
+      {series.map((s, si) => {
+        const d = s.data.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ')
+        const last = s.data[n - 1]
+        return (
+          <g key={s.name} className={'hc-s hc-s' + si}>
+            {si === 0 && <path d={d + ` L ${x(n - 1)} ${H - pad.b} L ${x(0)} ${H - pad.b} Z`} className="hc-fill" />}
+            <path d={d} className="hc-line" />
+            <circle cx={x(n - 1)} cy={y(last.v)} r="3.5" className="hc-end" />
+          </g>
+        )
+      })}
+    </svg>
   )
 }

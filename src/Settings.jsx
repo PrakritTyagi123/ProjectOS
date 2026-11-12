@@ -1,6 +1,7 @@
 import { useStore } from './store'
 import { Icon } from './ui'
-import { ThemeSwitch } from './App'
+import { ThemeSwitch, useUi } from './App'
+import { Knob } from './ui'
 
 function Row({ label, help, children }) {
   return (
@@ -16,6 +17,7 @@ function Row({ label, help, children }) {
 
 export default function Settings({ collapsed, setCollapsed }) {
   const { state, engine } = useStore()
+  const ui = useUi()
   const desk = state.machines['desktop-01']
   const copy = async () => {
     const data = JSON.stringify({ plan: state.plan, inbox: state.inbox, tasks: state.tasks, modules: state.modules, profile: state.profile }, null, 2)
@@ -40,6 +42,19 @@ export default function Settings({ collapsed, setCollapsed }) {
         <Row label="Theme" help="Charcoal (dark), graphite (light), or follow the system.">
           <ThemeSwitch />
         </Row>
+        <Row label="Density" help="Compact fits 15 or more projects on one screen.">
+          <div className="seg has-knob" role="radiogroup" aria-label="Density">
+            <Knob />
+            {['comfortable', 'compact'].map((k) => (
+              <button key={k} role="radio" aria-checked={ui.density === k} className={ui.density === k ? 'on' : ''} onClick={() => ui.setDensity(k)}>
+                {k[0].toUpperCase() + k.slice(1)}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <Row label="Command palette" help="Start, stop or open anything from the keyboard.">
+          <span className="small"><kbd>Ctrl</kbd> + <kbd>K</kbd></span>
+        </Row>
         <Row label="Collapsed sidebar" help="Icons only. Hover an icon to see its name.">
           <label className="switch">
             <input id="set-collapse" type="checkbox" checked={collapsed} onChange={(e) => setCollapsed(e.target.checked)} />
@@ -50,6 +65,17 @@ export default function Settings({ collapsed, setCollapsed }) {
 
       <section className="panel">
         <h2>Agent and security</h2>
+        <Row label="Connection" help={state.mode === 'live' ? 'Talking to the real agent through /api.' : 'No agent answered at /api, so everything here is simulated.'}>
+          <span className={'status status-' + (state.mode === 'live' ? 'good' : 'idle')}>
+            <span className={'led led-' + (state.mode === 'live' ? 'good' : 'idle')} />
+            <span>{state.mode === 'live' ? `Live: ${state.agent?.machine || 'agent'} ${state.agent?.version || ''}` : 'Demo mode'}</span>
+          </span>
+        </Row>
+        {state.mode === 'live' && state.agent?.warnings?.length > 0 && (
+          <Row label="Registry warnings" help="Fix these in registry.yaml on the PC; the agent reloads it automatically.">
+            <ul className="small c-warn warn-list">{state.agent.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+          </Row>
+        )}
         <Row label="API" help="Same-origin. A Pages Function forwards /api/* to the tunnel with a service token.">
           <code className="well-code">/api → agent.example.com</code>
         </Row>
@@ -74,7 +100,7 @@ export default function Settings({ collapsed, setCollapsed }) {
         </Row>
       </section>
 
-      <section className="panel">
+      {state.mode !== 'live' && <section className="panel">
         <h2>Demo</h2>
         <Row label="Simulate PC asleep" help="Shows how every page behaves when the agent can’t be reached.">
           <label className="switch">
@@ -87,7 +113,7 @@ export default function Settings({ collapsed, setCollapsed }) {
             Reset
           </button>
         </Row>
-      </section>
+      </section>}
     </div>
   )
 }
