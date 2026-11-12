@@ -1,0 +1,153 @@
+import { useEffect, useState } from 'react'
+import { PLAN_STATES } from './data'
+
+// ── formatting ───────────────────────────────────────────────
+export const clock = (t) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+export const ago = (t) => {
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000))
+  if (s < 60) return `${s}s ago`
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m} min ago`
+  const h = Math.round(m / 60)
+  if (h < 48) return `${h} h ago`
+  return `${Math.round(h / 24)} days ago`
+}
+export const uptime = (t) => {
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`
+  if (h) return `${h}h ${m}m`
+  if (m) return `${m}m ${s % 60}s`
+  return `${s}s`
+}
+export const gb = (v) => `${v.toFixed(1)} GB`
+
+// Re-render every second for live uptime counters.
+export function useNow(ms = 1000) {
+  const [, set] = useState(0)
+  useEffect(() => {
+    const i = setInterval(() => set((x) => x + 1), ms)
+    return () => clearInterval(i)
+  }, [ms])
+}
+
+// ── icons (stroke, 16px grid) ────────────────────────────────
+const paths = {
+  play: 'M5 3.5v9l7.5-4.5z',
+  stop: 'M4.5 4.5h7v7h-7z',
+  restart: 'M3 8a5 5 0 1 0 1.6-3.7M3 2.5v2.8h2.8',
+  open: 'M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5',
+  search: 'M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM10.6 10.6 14 14',
+  plus: 'M8 3v10M3 8h10',
+  back: 'M10 3 5 8l5 5',
+  grid: 'M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z',
+  flag: 'M3.5 14V2.5M3.5 3h8l-1.8 3 1.8 3h-8',
+  list: 'M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01',
+  x: 'M4 4l8 8M12 4l-8 8',
+  check: 'M3 8.5l3.2 3L13 4.5',
+  warn: 'M8 2 1.8 13h12.4zM8 6.5v3M8 11.5h.01',
+  copy: 'M5.5 5.5h7v7h-7zM3.5 10.5v-7h7',
+  bolt: 'M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z',
+  menu: 'M2.5 4h11M2.5 8h11M2.5 12h11',
+}
+export function Icon({ name, size = 16, className = '' }) {
+  return (
+    <svg className={'icon ' + className} width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={paths[name]} fill={name === 'play' || name === 'stop' || name === 'bolt' ? 'currentColor' : 'none'} />
+    </svg>
+  )
+}
+
+// ── status ──────────────────────────────────────────────────
+export const STATUS = {
+  running: { label: 'Running', tone: 'good' },
+  starting: { label: 'Starting', tone: 'busy' },
+  stopping: { label: 'Stopping', tone: 'busy' },
+  stopped: { label: 'Stopped', tone: 'idle' },
+  failed: { label: 'Failed', tone: 'bad' },
+  unhealthy: { label: 'Unhealthy', tone: 'warn' },
+  offline: { label: 'Machine offline', tone: 'off' },
+}
+export function StatusPill({ status, small }) {
+  const s = STATUS[status]
+  return (
+    <span className={`pill pill-${s.tone} ${small ? 'pill-sm' : ''}`}>
+      <span className="dot" />
+      {s.label}
+    </span>
+  )
+}
+
+export function PlanChip({ state }) {
+  return <span className={`plan-chip plan-${state}`}>{PLAN_STATES[state].label}</span>
+}
+
+export function Glyph({ p, size = 36 }) {
+  const initials = p.name
+    .replace(/[^A-Za-z0-9 -]/g, '')
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase()
+  return (
+    <span className="glyph" style={{ '--h': p.hue, width: size, height: size, fontSize: size * 0.36 }} aria-hidden="true">
+      {initials}
+    </span>
+  )
+}
+
+export function Sparkline({ data, max = 100, height = 34, className = '' }) {
+  const w = 120
+  const pts = data.map((v, i) => [(i / (data.length - 1)) * w, height - 2 - (Math.min(v, max) / max) * (height - 4)])
+  const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ')
+  const last = pts[pts.length - 1]
+  return (
+    <svg className={'spark ' + className} viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+      <line x1="0" x2={w} y1={height / 2} y2={height / 2} className="spark-grid" />
+      <path d={d + ` L ${w} ${height} L 0 ${height} Z`} className="spark-fill" />
+      <path d={d} className="spark-line" vectorEffect="non-scaling-stroke" />
+      <circle cx={last[0]} cy={last[1]} r="2.2" className="spark-end" />
+    </svg>
+  )
+}
+
+export function Bar({ value, max, tone = 'accent' }) {
+  return (
+    <div className="bar" role="meter" aria-valuenow={value} aria-valuemin={0} aria-valuemax={max}>
+      <span className={`bar-fill bar-${tone}`} style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
+    </div>
+  )
+}
+
+export function Button({ icon, children, variant = 'default', ...rest }) {
+  return (
+    <button className={`btn btn-${variant}`} {...rest}>
+      {icon && <Icon name={icon} />}
+      {children && <span>{children}</span>}
+    </button>
+  )
+}
+
+export function Modal({ title, onClose, children, wide }) {
+  useEffect(() => {
+    const k = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+  return (
+    <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className={'modal ' + (wide ? 'modal-wide' : '')} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-head">
+          <h2>{title}</h2>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <Icon name="x" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
