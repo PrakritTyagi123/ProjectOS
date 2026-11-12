@@ -165,12 +165,44 @@ function Toast() {
   )
 }
 
+// Theme: light / dark / system. Sets data-theme on <html>; remembered per browser.
+function useTheme() {
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem('projectos-theme') || 'light' } catch { return 'light' }
+  })
+  useEffect(() => {
+    const root = document.documentElement
+    root.classList.add('theming')
+    if (mode === 'system') root.removeAttribute('data-theme')
+    else root.setAttribute('data-theme', mode)
+    try { localStorage.setItem('projectos-theme', mode) } catch {}
+    const t = setTimeout(() => root.classList.remove('theming'), 450)
+    return () => clearTimeout(t)
+  }, [mode])
+  return [mode, setMode]
+}
+
+function ThemeSwitch() {
+  const [mode, setMode] = useTheme()
+  const opts = [['light', 'sun', 'Light'], ['dark', 'moon', 'Dark'], ['system', 'auto', 'Match system']]
+  return (
+    <div className="theme-sw" data-v={mode} role="radiogroup" aria-label="Theme">
+      <span className="theme-knob" aria-hidden="true" />
+      {opts.map(([k, ic, label]) => (
+        <button key={k} role="radio" aria-checked={mode === k} aria-label={label} title={label} className={(mode === k ? 'on ' : '') + (k === 'system' ? 'sys' : '')} onClick={() => setMode(k)}>
+          <Icon name={ic} />
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function TopBar({ route, onAdd }) {
   const { state, engine } = useStore()
   useNow(5000)
   const desk = state.machines['desktop-01']
   const agent = state.runtime['projectos']
-  const cur = route.startsWith('project-') ? 'overview' : route
+  const cur = route.startsWith('project-') || route.startsWith('readme-') ? 'overview' : route
   return (
     <header className="top">
       <div className="top-in">
@@ -201,6 +233,7 @@ function TopBar({ route, onAdd }) {
             <b>desktop-01</b>
             <span className="agent-sub">{desk ? `up ${uptime(agent.startedAt)}` : 'asleep'}</span>
           </div>
+          <ThemeSwitch />
           <label className="switch sleep-toggle" title="Demo: pretend the PC is asleep">
             <input id="sleep" type="checkbox" checked={!desk} onChange={(e) => engine.setMachine('desktop-01', !e.target.checked)} />
             <span>Sleep PC</span>
@@ -227,9 +260,10 @@ export default function App() {
   }
 
   let page
-  if (route.startsWith('project-')) {
-    const p = state.registry.find((x) => x.id === route.slice(8))
-    page = p ? <ProjectPage key={p.id} p={p} /> : <NotFound />
+  if (route.startsWith('project-') || route.startsWith('readme-')) {
+    const isReadme = route.startsWith('readme-')
+    const p = state.registry.find((x) => x.id === route.slice(isReadme ? 7 : 8))
+    page = p ? <ProjectPage key={p.id} p={p} readme={isReadme} /> : <NotFound />
   } else if (route === 'plan') page = <PlanPage />
   else if (route === 'activity') page = <ActivityPage />
   else page = <Overview onAdd={() => setAdding(true)} />

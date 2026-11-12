@@ -44,6 +44,9 @@ your email*. Do this before the real agent is connected.
 | `src/ProjectPage.jsx` | Per-project page: Overview, Logs, Config, Plan, Models. |
 | `src/PlanPage.jsx` | Active / Committed / Queued / Parked board, week, idea inbox. |
 | `src/ActivityPage.jsx` | Audit log of remote actions. |
+| `src/Readme.jsx` | Per-project README page (`#readme-<id>`): Markdown editor, images, GIFs, videos. |
+| `src/readmes.js` | Demo README text and images. |
+| `src/media.js` | IndexedDB storage for uploaded media (demo only). |
 | `src/AddProject.jsx` | Register-a-project flow with validation. |
 
 ## Going from demo to real (later, not now)
@@ -57,6 +60,16 @@ Everything the UI needs comes through `useEngine` in `store.jsx`. Replace:
 
 The browser only ever sends a project **id**. Paths and commands stay in
 `registry.yaml` on the PC.
+
+Theme: light, dark or match system, from the switch in the top bar.
+
+README pages: every project has one at `#readme-<id>` (or the README tab).
+Edit with Markdown; drop, paste or pick images, GIFs and videos (up to 300 MB
+each). In the demo they're stored in this browser (IndexedDB). For the real
+app, have the agent serve `README.md` and `docs/media/*` from each project folder:
+
+- `GET /api/projects/{id}/readme` → markdown
+- `GET /api/projects/{id}/media/{file}` → the file (supports Range for video)
 
 Plan edits are saved in this browser's localStorage only. "Reset demo" in the
 sidebar clears them.

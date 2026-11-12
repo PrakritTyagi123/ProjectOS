@@ -242,6 +242,9 @@ function Module({ p, i }) {
             <span className="muted">{CATEGORIES[p.category]}</span>
           )}
         </span>
+        <a className="mod-doc" href={'#readme-' + p.id} title={`${p.name} README`} aria-label={`${p.name} README`}>
+          <Icon name="doc" size={14} />
+        </a>
         <PlanChip state={pl.state} />
       </div>
     </li>

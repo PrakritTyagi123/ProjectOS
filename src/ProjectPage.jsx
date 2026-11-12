@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, statusOf } from './store'
 import { CATEGORIES, MACHINES, PLAN_STATES } from './data'
 import { Icon, Glyph, StatusPill, PlanChip, Button, Heartbeat, LiveBars, Led, STATUS, clock, ago, uptime, useNow, gb, catVar } from './ui'
-import { RunControls, Power } from './App'
+import { RunControls, Power, go } from './App'
+import Readme from './Readme'
 
 const STEPS = [
   ['spawn', 'Spawn', 'Approved executable launched inside a Job Object'],
@@ -503,14 +504,24 @@ function ModelsTab({ p }) {
   )
 }
 
-export default function ProjectPage({ p }) {
+export default function ProjectPage({ p, readme }) {
   const { state } = useStore()
   useNow(1000)
-  const [tab, setTab] = useState('overview')
+  const [tab, setTabRaw] = useState(readme ? 'readme' : 'overview')
+  useEffect(() => {
+    if (readme) setTabRaw('readme')
+    else setTabRaw((t) => (t === 'readme' ? 'overview' : t))
+  }, [readme])
+  // README has its own address (#readme-<id>) so it can be bookmarked or shared.
+  const setTab = (k) => {
+    if (k === 'readme') return go('readme-' + p.id)
+    setTabRaw(k)
+    if (readme) go('project-' + p.id)
+  }
   const r = state.runtime[p.id]
   const st = statusOf(state, p)
   const pl = state.plan[p.id]
-  const tabs = [['overview', 'Overview'], ...(p.models ? [['models', 'Models']] : []), ['logs', 'Logs'], ['config', 'Config'], ['plan', 'Plan']]
+  const tabs = [['overview', 'Overview'], ['readme', 'README'], ...(p.models ? [['models', 'Models']] : []), ['logs', 'Logs'], ['config', 'Config'], ['plan', 'Plan']]
   const errCount = r.logs.filter((l) => l.stream === 'err').length
 
   return (
@@ -564,6 +575,7 @@ export default function ProjectPage({ p }) {
       </div>
 
       <div className="tab-body" key={tab}>
+        {tab === 'readme' && <Readme p={p} />}
         {tab === 'overview' && <OverviewTab p={p} r={r} st={st} setTab={setTab} />}
         {tab === 'logs' && <LogsTab p={p} r={r} />}
         {tab === 'config' && <ConfigTab p={p} />}
