@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { useStore, statusOf } from './store'
 import { MACHINES } from './data'
-import { Icon, Glyph, Button, Modal, StatusPill, ago, useNow } from './ui'
+import { Icon, Glyph, Button, Modal, Led, ago, useNow, uptime } from './ui'
 import Overview from './Overview'
 import ProjectPage from './ProjectPage'
 import PlanPage from './PlanPage'
@@ -24,58 +24,80 @@ function useRoute() {
 }
 export const go = (h) => (location.hash = h)
 
-// ── run controls with VRAM guard ──
 const UiCtx = createContext(null)
 export const useUi = () => useContext(UiCtx)
 
-export function RunControls({ p, compact }) {
+// Round power button used on modules and the project header.
+export function Power({ p, big }) {
   const { state, engine } = useStore()
   const { requestStart } = useUi()
   const st = statusOf(state, p)
-  if (p.self) return <span className="muted small">Always on</span>
-  const label = (t) => (compact ? null : t)
-  if (st === 'offline')
+  const cls = 'power ' + (big ? 'power-big ' : '') + 'pw-' + st
+  if (p.self)
     return (
-      <Button icon="play" disabled title="Machine offline">
-        {label('Start')}
-      </Button>
+      <span className={cls + ' pw-self'} title="Always on. Managed by Task Scheduler.">
+        <Icon name="bolt" size={big ? 20 : 15} />
+      </span>
     )
-  if (st === 'starting')
-    return (
-      <div className="ctl">
-        <Button icon="stop" onClick={() => engine.stop(p.id)} aria-label={`Cancel start of ${p.name}`}>
-          {label('Cancel')}
+  const label = st === 'running' ? `Stop ${p.name}` : st === 'starting' ? `Cancel start of ${p.name}` : `${p.job ? 'Run' : 'Start'} ${p.name}`
+  const onClick = () => {
+    if (st === 'running' || st === 'starting') engine.stop(p.id)
+    else if (st === 'stopped' || st === 'failed') requestStart(p.id)
+  }
+  return (
+    <button className={cls} onClick={onClick} disabled={st === 'offline' || st === 'stopping'} aria-label={label} title={label}>
+      <svg viewBox="0 0 24 24" width={big ? 22 : 16} height={big ? 22 : 16} aria-hidden="true">
+        <path d="M12 3v8" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" fill="none" />
+        <path d="M6.3 6.8a8 8 0 1 0 11.4 0" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" fill="none" />
+      </svg>
+    </button>
+  )
+}
+
+export function RunControls({ p }) {
+  const { state, engine } = useStore()
+  const { requestStart } = useUi()
+  const st = statusOf(state, p)
+  if (p.self) return <span className="always">Always on</span>
+  return (
+    <div className="ctl">
+      {(st === 'stopped' || st === 'failed') && (
+        <>
+          <Button icon="play" variant="primary" onClick={() => requestStart(p.id)}>
+            {p.job ? 'Run job' : st === 'failed' ? 'Try again' : 'Start'}
+          </Button>
+          {p.frontend && (
+            <Button icon="open" onClick={() => requestStart(p.id, true)}>
+              Start and open
+            </Button>
+          )}
+        </>
+      )}
+      {st === 'starting' && (
+        <Button icon="stop" onClick={() => engine.stop(p.id)}>
+          Cancel
         </Button>
-      </div>
-    )
-  if (st === 'stopping') return <Button disabled>{compact ? '…' : 'Stopping…'}</Button>
-  if (st === 'running')
-    return (
-      <div className="ctl">
-        <Button icon="stop" onClick={() => engine.stop(p.id)} aria-label={`Stop ${p.name}`}>
-          {label('Stop')}
-        </Button>
-        {!compact && (
+      )}
+      {st === 'stopping' && <Button disabled>Stopping…</Button>}
+      {st === 'running' && (
+        <>
+          <Button icon="stop" variant="danger" onClick={() => engine.stop(p.id)}>
+            Stop
+          </Button>
           <Button icon="restart" onClick={() => engine.restart(p.id)}>
             Restart
           </Button>
-        )}
-        {!compact && p.frontend && (
-          <a className="btn btn-primary" href={p.frontend} target="_blank" rel="noopener noreferrer">
-            <Icon name="open" />
-            <span>Open app</span>
-          </a>
-        )}
-      </div>
-    )
-  return (
-    <div className="ctl">
-      <Button icon="play" variant="primary" onClick={() => requestStart(p.id)} aria-label={`${p.job ? 'Run' : 'Start'} ${p.name}`}>
-        {label(p.job ? 'Run job' : st === 'failed' ? 'Try again' : 'Start')}
-      </Button>
-      {!compact && p.frontend && (
-        <Button icon="open" onClick={() => requestStart(p.id, true)}>
-          Start and open
+          {p.frontend && (
+            <a className="btn btn-primary" href={p.frontend} target="_blank" rel="noopener noreferrer">
+              <Icon name="open" />
+              <span>Open app</span>
+            </a>
+          )}
+        </>
+      )}
+      {st === 'offline' && (
+        <Button icon="play" disabled>
+          Start
         </Button>
       )}
     </div>
@@ -92,25 +114,21 @@ function ConflictModal({ pending, onClose }) {
     let left = c.holders.length
     c.holders.forEach((h) => engine.stop(h.id, { then: () => --left === 0 && engine.start(p.id, { open: pending.open }) }))
   }
+  const total = c.total
   return (
     <Modal title="The GPU is busy" onClose={onClose}>
       <p>
-        {p.name} needs about <b>{c.need.toFixed(1)} GB</b> of VRAM. {names} {c.holders.length > 1 ? 'are' : 'is'} holding{' '}
-        <b>{c.used.toFixed(1)} GB</b> of the {c.total} GB on the RTX 4080.
+        {p.name} needs about <b>{c.need.toFixed(1)} GB</b> of VRAM. {names} {c.holders.length > 1 ? 'are' : 'is'} holding <b>{c.used.toFixed(1)} GB</b> of the {total} GB on the RTX 4080.
       </p>
-      <div className="vram-compare">
+      <div className="vram-strip vram-modal">
         {c.holders.map((h) => (
-          <div key={h.id} className="vc-row">
-            <Glyph p={h} size={24} />
-            <span>{h.name}</span>
-            <span className="num">{h.profile.vram.toFixed(1)} GB</span>
-          </div>
+          <span key={h.id} className="vs-seg" style={{ width: (h.profile.vram / total) * 100 + '%', '--h': h.hue }}>
+            {h.name}
+          </span>
         ))}
-        <div className="vc-row vc-new">
-          <Glyph p={p} size={24} />
-          <span>{p.name}</span>
-          <span className="num">+{c.need.toFixed(1)} GB</span>
-        </div>
+        <span className="vs-seg vs-new" style={{ width: (c.need / total) * 100 + '%', '--h': p.hue }}>
+          {p.name}
+        </span>
       </div>
       <div className="modal-actions">
         <Button onClick={onClose}>Cancel</Button>
@@ -147,91 +165,52 @@ function Toast() {
   )
 }
 
-function Sidebar({ route, onAdd, open, setOpen }) {
+function TopBar({ route, onAdd }) {
   const { state, engine } = useStore()
   useNow(5000)
   const desk = state.machines['desktop-01']
-  const running = state.registry.filter((p) => !p.self && ['running', 'starting', 'stopping'].includes(statusOf(state, p)))
-  const active = state.registry.find((p) => state.plan[p.id]?.state === 'active')
-  const nav = [
-    ['overview', 'grid', 'Overview'],
-    ['plan', 'flag', 'Plan'],
-    ['activity', 'list', 'Activity'],
-  ]
+  const agent = state.runtime['projectos']
   const cur = route.startsWith('project-') ? 'overview' : route
   return (
-    <aside className={'side ' + (open ? 'side-open' : '')}>
-      <div className="brand">
-        <span className="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="22" height="22">
-            <rect x="2" y="2" width="20" height="20" rx="5" fill="var(--ink)" />
-            <path d="M8 7v10M8 7h4.5a3 3 0 0 1 0 6H8" stroke="var(--bg)" strokeWidth="2.2" fill="none" strokeLinecap="round" />
-            <circle cx="16.5" cy="16.5" r="1.8" fill="var(--accent)" />
-          </svg>
-        </span>
-        <span className="brand-name">ProjectOS</span>
-        <button className="icon-btn side-toggle" onClick={() => setOpen(!open)} aria-label="Menu" aria-expanded={open}>
-          <Icon name={open ? 'x' : 'menu'} />
-        </button>
-      </div>
-      <div className="side-body">
-        <nav className="nav">
-          {nav.map(([id, ic, label]) => (
-            <a key={id} href={'#' + id} className={'nav-item ' + (cur === id ? 'on' : '')} onClick={() => setOpen(false)}>
+    <header className="top">
+      <div className="top-in">
+        <a href="#overview" className="brand" aria-label="ProjectOS home">
+          <span className="brand-mark" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="brand-name">ProjectOS</span>
+        </a>
+        <nav className="nav" aria-label="Main">
+          {[
+            ['overview', 'grid', 'Overview'],
+            ['plan', 'flag', 'Plan'],
+            ['activity', 'list', 'Activity'],
+          ].map(([id, ic, label]) => (
+            <a key={id} href={'#' + id} className={'nav-item ' + (cur === id ? 'on' : '')} aria-current={cur === id ? 'page' : undefined}>
               <Icon name={ic} />
-              {label}
+              <span>{label}</span>
             </a>
           ))}
-          <button className="nav-item" onClick={onAdd}>
-            <Icon name="plus" />
-            Add project
-          </button>
         </nav>
-
-        {active && (
-          <div className="side-sec">
-            <div className="side-h">Active project</div>
-            <a href={'#project-' + active.id} className="side-proj" onClick={() => setOpen(false)}>
-              <Glyph p={active} size={22} />
-              <span>{active.name}</span>
-            </a>
+        <div className="top-right">
+          <div className={'agent-chip ' + (desk ? '' : 'agent-off')} title={desk ? `Agent ${MACHINES['desktop-01'].agent}, tunnel connected` : `Last seen ${ago(state.lastSeen)}`}>
+            <Led status={desk ? 'running' : 'offline'} />
+            <b>desktop-01</b>
+            <span className="agent-sub">{desk ? `up ${uptime(agent.startedAt)}` : 'asleep'}</span>
           </div>
-        )}
-
-        <div className="side-sec">
-          <div className="side-h">Running now</div>
-          {running.length === 0 && <div className="muted small side-empty">Nothing running. Backends start on demand.</div>}
-          {running.map((p) => (
-            <a key={p.id} href={'#project-' + p.id} className="side-proj" onClick={() => setOpen(false)}>
-              <Glyph p={p} size={22} />
-              <span>{p.name}</span>
-              <StatusPill status={statusOf(state, p)} small />
-            </a>
-          ))}
-        </div>
-
-        <div className="side-foot">
-          <div className={'agent-card ' + (desk ? '' : 'agent-off')}>
-            <div className="agent-row">
-              <span className={'beacon ' + (desk ? 'beacon-on' : '')} />
-              <b>{MACHINES['desktop-01'].id}</b>
-              <span className="muted small">{desk ? 'online' : 'offline'}</span>
-            </div>
-            <div className="muted small">{desk ? `Agent ${MACHINES['desktop-01'].agent}, tunnel connected` : `Last seen ${ago(state.lastSeen)}`}</div>
-            <label className="switch">
-              <input type="checkbox" checked={!desk} onChange={(e) => engine.setMachine('desktop-01', !e.target.checked)} />
-              <span>Simulate PC asleep</span>
-            </label>
-          </div>
-          <div className="demo-note">
-            Demo data. Nothing here touches a real machine.{' '}
-            <button className="link" onClick={engine.reset}>
-              Reset demo
-            </button>
-          </div>
+          <label className="switch sleep-toggle" title="Demo: pretend the PC is asleep">
+            <input id="sleep" type="checkbox" checked={!desk} onChange={(e) => engine.setMachine('desktop-01', !e.target.checked)} />
+            <span>Sleep PC</span>
+          </label>
+          <Button icon="plus" variant="primary" onClick={onAdd}>
+            <span className="hide-sm">Add project</span>
+          </Button>
         </div>
       </div>
-    </aside>
+    </header>
   )
 }
 
@@ -240,7 +219,6 @@ export default function App() {
   const { state, engine } = useStore()
   const [adding, setAdding] = useState(false)
   const [pending, setPending] = useState(null)
-  const [menu, setMenu] = useState(false)
 
   const requestStart = (id, open) => {
     const conflict = engine.vramConflict(id)
@@ -260,17 +238,23 @@ export default function App() {
   return (
     <UiCtx.Provider value={{ requestStart }}>
       <div className="shell">
-        <Sidebar route={route} onAdd={() => setAdding(true)} open={menu} setOpen={setMenu} />
+        <TopBar route={route} onAdd={() => setAdding(true)} />
         <main className="main">
           {!desk && (
             <div className="offline-banner" role="alert">
               <Icon name="warn" />
               <div>
-                <b>desktop-01 is offline.</b> This dashboard still loads from Cloudflare, but nothing can start until the PC is awake and the agent reconnects. Last seen {ago(state.lastSeen)}.
+                <b>desktop-01 is asleep or offline.</b> The dashboard still loads from Cloudflare, but nothing can start until the PC wakes and the agent reconnects. Last seen {ago(state.lastSeen)}.
               </div>
             </div>
           )}
           {page}
+          <footer className="foot">
+            Demo data. Nothing here touches a real machine.{' '}
+            <button className="link" onClick={engine.reset}>
+              Reset demo
+            </button>
+          </footer>
         </main>
       </div>
       {adding && <AddProject onClose={() => setAdding(false)} />}
@@ -283,7 +267,7 @@ export default function App() {
 function NotFound() {
   return (
     <div className="page">
-      <h1>No project with that address</h1>
+      <h1>No project at this address</h1>
       <p className="muted">It may have been removed from registry.yaml.</p>
       <a className="btn btn-primary" href="#overview">
         <Icon name="back" />

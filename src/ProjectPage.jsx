@@ -1,35 +1,36 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, statusOf } from './store'
 import { CATEGORIES, MACHINES, PLAN_STATES } from './data'
-import { Icon, Glyph, StatusPill, PlanChip, Button, clock, ago, uptime, useNow, gb } from './ui'
-import { RunControls } from './App'
+import { Icon, Glyph, StatusPill, PlanChip, Button, Heartbeat, LiveBars, Led, STATUS, clock, ago, uptime, useNow, gb, catVar } from './ui'
+import { RunControls, Power } from './App'
 
 const STEPS = [
-  ['spawn', 'Spawn process', 'Agent launches the approved executable inside a Job Object.'],
-  ['boot', 'Boot', 'The app loads config, models and opens its port.'],
-  ['health', 'Health check', 'Agent polls the health URL until it answers 200.'],
-  ['ready', 'Ready', 'Only now does the dashboard call it running.'],
+  ['spawn', 'Spawn', 'Approved executable launched inside a Job Object'],
+  ['boot', 'Boot', 'Config, models and port come up'],
+  ['health', 'Health check', 'Agent polls until it answers 200'],
+  ['ready', 'Ready', 'Only now is it called running'],
 ]
 
 function Lifecycle({ p, r, st }) {
-  const idx = st === 'running' ? 3 : st === 'starting' ? STEPS.findIndex((s) => s[0] === r.phase) : st === 'failed' ? 1 : -1
+  const idx = st === 'running' ? 4 : st === 'starting' ? STEPS.findIndex((s) => s[0] === r.phase) : st === 'failed' ? 1 : -1
+  const fill = st === 'running' ? 100 : idx < 0 ? 0 : (idx / 3) * 100
   return (
-    <section className="panel span-2">
+    <section className="panel span-2 lifecycle">
       <header className="panel-h">
         <h3>Lifecycle</h3>
         <span className="muted small">
-          {st === 'running' && r.readyMs ? `Last start reached ready in ${(r.readyMs / 1000).toFixed(1)} s` : st === 'failed' ? 'Last start failed during boot' : 'Process exists is not the same as ready'}
+          {st === 'running' && r.readyMs ? `Reached ready in ${(r.readyMs / 1000).toFixed(1)} s` : st === 'failed' ? 'Last start failed during boot' : st === 'starting' ? 'Starting…' : 'A process existing is not the same as ready'}
         </span>
       </header>
-      <ol className="steps">
+      <ol className={'steps steps-' + st} style={{ '--fill': fill + '%' }}>
         {STEPS.map(([k, t, d], i) => {
-          const cls = st === 'failed' && i === idx ? 'step-bad' : i < idx || (i === idx && st === 'running') ? 'step-done' : i === idx ? 'step-now' : ''
+          const cls = st === 'failed' && i === idx ? 'step-bad' : i < idx ? 'step-done' : i === idx ? 'step-now' : ''
           const skip = k === 'health' && !p.health
           return (
             <li key={k} className={'step ' + cls + (skip ? ' step-skip' : '')}>
-              <span className="step-mark">{cls === 'step-done' ? <Icon name="check" size={12} /> : cls === 'step-bad' ? <Icon name="x" size={12} /> : i + 1}</span>
+              <span className="step-mark">{cls === 'step-done' ? <Icon name="check" size={13} /> : cls === 'step-bad' ? <Icon name="x" size={13} /> : i + 1}</span>
               <b>{t}</b>
-              <span className="small muted">{skip ? 'No health URL. Ready means the process stayed alive.' : d}</span>
+              <span className="small muted">{skip ? 'No health URL; alive process counts as ready' : d}</span>
             </li>
           )
         })}
@@ -39,14 +40,14 @@ function Lifecycle({ p, r, st }) {
           <Icon name="warn" />
           <div>
             <b>{r.error}</b>
-            <div className="small">The agent never marks a failed launch as running. Check the last error lines in Logs.</div>
+            <div className="small">A failed launch is never shown as running. The last error lines are in Logs.</div>
           </div>
         </div>
       )}
       {p.interactive && (
         <div className="callout">
           <Icon name="warn" />
-          <div className="small">Opens a window on the desktop session. This needs you logged in on the PC; it won’t stream to your phone.</div>
+          <div className="small">Opens a window on the desktop session. You need to be logged in on the PC, and it won’t stream to your phone.</div>
         </div>
       )}
       {p.udp && (
@@ -68,59 +69,84 @@ function Field({ k, children }) {
   )
 }
 
+function Metric({ label, value, data, color }) {
+  return (
+    <div className="metric" style={{ '--c': color }}>
+      <span className="small muted">{label}</span>
+      <b className="num">{value}</b>
+      <LiveBars data={data} color={color} />
+    </div>
+  )
+}
+
 function OverviewTab({ p, r, st, setTab }) {
   const { state } = useStore()
   const pl = state.plan[p.id]
   const running = st === 'running'
-  const errors = r.logs.filter((l) => l.stream === 'err').slice(-3)
+  const tail = r.logs.slice(-9)
+  const c = catVar(p.category)
+  const ramHist = r.hist.map((v) => (v ? p.profile.ram * (0.9 + (v % 7) / 50) : 0))
+  const vramHist = r.hist.map((v) => (v && p.gpu ? p.profile.vram * (0.95 + (v % 5) / 80) : 0))
   return (
     <div className="tab-grid">
       <Lifecycle p={p} r={r} st={st} />
 
-      <section className="panel">
+      <section className="panel health">
         <header className="panel-h">
           <h3>Health</h3>
-          {p.health && running && <span className="pill pill-good pill-sm"><span className="dot" />Passing</span>}
+          <span className={'st st-' + (running ? 'good' : st === 'failed' ? 'bad' : 'idle')}>
+            <Led status={running ? 'running' : st === 'failed' ? 'failed' : 'stopped'} />
+            {running ? (p.health ? `${r.health?.ms ?? 9} ms` : 'Alive') : st === 'failed' ? 'Down' : 'No signal'}
+          </span>
         </header>
+        <Heartbeat alive={running} tone={st === 'failed' ? 'bad' : 'good'} height={54} />
         <dl className="kvs">
           <Field k="Endpoint">{p.health ? <code>{p.health}</code> : <span className="muted">None configured</span>}</Field>
-          <Field k="Last check">{running && r.health ? `${ago(r.health.at)}, ${r.health.ms} ms` : '–'}</Field>
-          <Field k="Interval">Every 5 s while running</Field>
+          <Field k="Last check">{running && r.health ? ago(r.health.at) : '–'}</Field>
           <Field k="Uptime">{running ? uptime(r.startedAt) : '–'}</Field>
-        </dl>
-      </section>
-
-      <section className="panel">
-        <header className="panel-h">
-          <h3>Process</h3>
-        </header>
-        <dl className="kvs">
           <Field k="PID">{running || st === 'starting' ? <span className="num">{r.pid}</span> : '–'}</Field>
-          <Field k="Children">{running ? <span className="num">{p.kind === 'Python' ? 2 : 1} in job</span> : '–'}</Field>
-          <Field k="Restart policy">{p.restart}</Field>
-          <Field k="Last exit">{r.lastExit == null ? '–' : <span className={r.lastExit ? 'c-bad' : ''}>code {r.lastExit}</span>}</Field>
         </dl>
       </section>
 
       <section className="panel">
         <header className="panel-h">
           <h3>Resources</h3>
+          <span className="muted small">{p.gpu ? `Expects ~${p.profile.vram} GB VRAM${p.exclusiveGpu ? ', GPU-exclusive' : ''}` : 'CPU only'}</span>
         </header>
-        <div className="res">
-          <div>
-            <span className="muted small">CPU</span>
-            <b className="num">{running ? r.cpu.toFixed(0) + '%' : '–'}</b>
-          </div>
-          <div>
-            <span className="muted small">RAM</span>
-            <b className="num">{running ? gb(r.ram) : '–'}</b>
-          </div>
-          <div>
-            <span className="muted small">VRAM</span>
-            <b className="num">{running && p.gpu ? gb(r.vram) : p.gpu ? '–' : 'n/a'}</b>
-          </div>
+        <div className="metrics">
+          <Metric label="CPU" value={running ? r.cpu.toFixed(0) + '%' : '–'} data={r.hist} color={c} />
+          <Metric label="RAM" value={running ? gb(r.ram) : '–'} data={ramHist} color="var(--c-tools)" />
+          <Metric label="VRAM" value={p.gpu ? (running ? gb(r.vram) : '–') : 'n/a'} data={vramHist} color="var(--c-games)" />
         </div>
-        {p.gpu && <p className="small muted">Expected VRAM when running: about {p.profile.vram} GB.{p.exclusiveGpu ? ' Marked GPU-exclusive.' : ''}</p>}
+      </section>
+
+      <section className="panel span-2 tail">
+        <header className="panel-h">
+          <h3>Live output</h3>
+          <button className="link small" onClick={() => setTab('logs')}>
+            Full logs
+          </button>
+        </header>
+        <div className="log log-short">
+          {tail.length === 0 && <div className="log-empty">No output yet.</div>}
+          {tail.map((l, i) => (
+            <div key={l.t + '-' + i} className={'ll ll-' + l.stream}>
+              <span className="ll-t">{clock(l.t)}</span>
+              <span className="ll-x">{l.text}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <header className="panel-h">
+          <h3>Next action</h3>
+          <button className="link small" onClick={() => setTab('plan')}>
+            Open plan
+          </button>
+        </header>
+        <p className="next-big">{pl.next}</p>
+        <div className="muted small">{pl.milestone}</div>
       </section>
 
       <section className="panel">
@@ -139,42 +165,11 @@ function OverviewTab({ p, r, st, setTab }) {
           </Field>
           <Field k="Repo">{p.repo}</Field>
           <Field k="Branch">
-            <code>{p.branch}</code>
+            <code>{p.branch}</code> <code className="muted">{p.commit}</code>
           </Field>
-          <Field k="Commit">
-            <code>{p.commit}</code> <span className="muted">{p.commitMsg}</span>
-          </Field>
+          <Field k="Depends on">{p.deps.length ? p.deps.join(', ') : <span className="muted">Nothing</span>}</Field>
         </dl>
-        {p.frontend && st !== 'running' && <p className="small muted">The app page still loads while the backend is stopped and shows its Backend offline screen.</p>}
       </section>
-
-      <section className="panel">
-        <header className="panel-h">
-          <h3>Next action</h3>
-          <button className="link small" onClick={() => setTab('plan')}>
-            Open plan
-          </button>
-        </header>
-        <p className="next-big">{pl.next}</p>
-        <div className="muted small">{pl.milestone}</div>
-      </section>
-
-      {(errors.length > 0 || p.deps.length > 0) && (
-        <section className="panel">
-          <header className="panel-h">
-            <h3>{errors.length ? 'Recent errors' : 'Depends on'}</h3>
-          </header>
-          {errors.length ? (
-            <pre className="mini-log">{errors.map((l) => l.text).join('\n')}</pre>
-          ) : (
-            <ul className="plain">
-              {p.deps.map((d) => (
-                <li key={d}>{d}</li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
     </div>
   )
 }
@@ -520,26 +515,33 @@ export default function ProjectPage({ p }) {
 
   return (
     <div className="page">
-      <a href="#overview" className="crumb">
-        <Icon name="back" /> All projects
-      </a>
-      <header className="proj-head">
-        <Glyph p={p} size={52} />
-        <div className="proj-title">
-          <h1>{p.name}</h1>
-          <p className="muted">{p.blurb}</p>
-          <div className="proj-meta">
-            <StatusPill status={st} />
-            <PlanChip state={pl.state} />
-            <span className="small muted">
-              {CATEGORIES[p.category]}, {p.kind}, on {p.machine}
-            </span>
-            {st === 'running' && <span className="small muted">Up {uptime(r.startedAt)}</span>}
+      <header className={'proj-hero ph-' + st} style={{ '--c': catVar(p.category), '--h': p.hue }}>
+        <a href="#overview" className="crumb">
+          <Icon name="back" /> All projects
+        </a>
+        <div className="ph-row">
+          <Power p={p} big />
+          <div className="ph-title">
+            <h1>{p.name}</h1>
+            <p>{p.blurb}</p>
+            <div className="ph-meta">
+              <span className={'st st-' + STATUS[st].tone}>
+                <Led status={st} />
+                {STATUS[st].label}
+                {st === 'running' && <span className="num"> {uptime(r.startedAt)}</span>}
+              </span>
+              <PlanChip state={pl.state} />
+              <span className="ph-tag">{CATEGORIES[p.category]}</span>
+              <span className="ph-tag">{p.kind}</span>
+              <span className="ph-tag">{p.machine}</span>
+              {p.port && <span className="ph-tag num">{p.udp ? 'UDP' : 'port'} {p.port}</span>}
+            </div>
+          </div>
+          <div className="ph-actions">
+            <RunControls p={p} />
           </div>
         </div>
-        <div className="proj-actions">
-          <RunControls p={p} />
-        </div>
+        {st === 'starting' && <div className="ph-progress" />}
       </header>
 
       {st === 'offline' && (
@@ -561,11 +563,13 @@ export default function ProjectPage({ p }) {
         ))}
       </div>
 
-      {tab === 'overview' && <OverviewTab p={p} r={r} st={st} setTab={setTab} />}
-      {tab === 'logs' && <LogsTab p={p} r={r} />}
-      {tab === 'config' && <ConfigTab p={p} />}
-      {tab === 'plan' && <PlanTab p={p} />}
-      {tab === 'models' && <ModelsTab p={p} />}
+      <div className="tab-body" key={tab}>
+        {tab === 'overview' && <OverviewTab p={p} r={r} st={st} setTab={setTab} />}
+        {tab === 'logs' && <LogsTab p={p} r={r} />}
+        {tab === 'config' && <ConfigTab p={p} />}
+        {tab === 'plan' && <PlanTab p={p} />}
+        {tab === 'models' && <ModelsTab p={p} />}
+      </div>
     </div>
   )
 }

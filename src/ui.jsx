@@ -151,3 +151,78 @@ export function Modal({ title, onClose, children, wide }) {
     </div>
   )
 }
+
+// ── v2 visual pieces ─────────────────────────────────────────
+export const catVar = (c) => `var(--c-${c})`
+
+// Radial gauge, 270° sweep.
+export function Gauge({ value, max = 100, label, unit = '%', color = 'var(--accent)', sub }) {
+  const r = 34
+  const C = 2 * Math.PI * r
+  const sweep = C * 0.75
+  const pct = Math.max(0, Math.min(1, value / max))
+  return (
+    <div className="gauge" style={{ '--g': color }}>
+      <svg viewBox="0 0 84 84" aria-hidden="true">
+        <circle cx="42" cy="42" r={r} className="g-track" strokeDasharray={`${sweep} ${C}`} transform="rotate(135 42 42)" />
+        <circle cx="42" cy="42" r={r} className="g-val" strokeDasharray={`${sweep * pct} ${C}`} transform="rotate(135 42 42)" />
+      </svg>
+      <div className="g-read">
+        <b className="num">{unit === '%' ? Math.round(value) : value.toFixed(1)}</b>
+        <span>{unit === '%' ? '%' : `/${max}${unit}`}</span>
+      </div>
+      <div className="g-label">{label}</div>
+      {sub && <div className="g-sub">{sub}</div>}
+    </div>
+  )
+}
+
+// Progress ring used for definition-of-done.
+export function Ring({ done, total, size = 96 }) {
+  const r = 40
+  const C = 2 * Math.PI * r
+  return (
+    <svg className="ring" width={size} height={size} viewBox="0 0 96 96" aria-label={`${done} of ${total} done`}>
+      <defs>
+        <linearGradient id="ringgrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="var(--hot)" />
+          <stop offset="0.5" stopColor="var(--accent)" />
+          <stop offset="1" stopColor="var(--c-web)" />
+        </linearGradient>
+      </defs>
+      <circle cx="48" cy="48" r={r} className="ring-track" />
+      <circle cx="48" cy="48" r={r} className="ring-val" strokeDasharray={`${(C * done) / Math.max(1, total)} ${C}`} transform="rotate(-90 48 48)" />
+      <text x="48" y="47" textAnchor="middle" className="ring-n">{done}</text>
+      <text x="48" y="64" textAnchor="middle" className="ring-of">of {total}</text>
+    </svg>
+  )
+}
+
+// Heartbeat trace. Beats while alive, flat when not.
+const BEAT = (o) => `H${o + 22} L${o + 26} 14 L${o + 30} 20 H${o + 36} L${o + 40} 4 L${o + 45} 34 L${o + 49} 20 H${o + 56} L${o + 60} 16 L${o + 64} 20 H${o + 100}`
+export function Heartbeat({ alive, tone = 'good', height = 40 }) {
+  const d = alive ? `M0 20 ${BEAT(0)} ${BEAT(100)}` : 'M0 20 H200'
+  return (
+    <div className={'hb hb-' + tone + (alive ? ' hb-alive' : '')} style={{ height }}>
+      <svg viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true">
+        <path d={d} vectorEffect="non-scaling-stroke" />
+      </svg>
+    </div>
+  )
+}
+
+export function Led({ status }) {
+  return <span className={'led led-' + (STATUS[status]?.tone || 'idle')} aria-hidden="true" />
+}
+
+// Live bars (per-project CPU history).
+export function LiveBars({ data, color }) {
+  const max = Math.max(20, ...data)
+  return (
+    <div className="lbars" style={{ '--c': color }} aria-hidden="true">
+      {data.map((v, i) => (
+        <span key={i} style={{ height: Math.max(4, (v / max) * 100) + '%' }} />
+      ))}
+    </div>
+  )
+}

@@ -1,6 +1,8 @@
 import { useStore } from './store'
 import { Glyph, ago, clock, useNow } from './ui'
 
+const TONE = { Start: 'good', 'Run job': 'good', Stop: 'idle', Restart: 'busy', Register: 'accent', 'Sign-in': 'bad' }
+
 export default function ActivityPage() {
   const { state } = useStore()
   useNow(10000)
@@ -28,13 +30,13 @@ export default function ActivityPage() {
               {state.activity.map((a, i) => {
                 const p = a.project && state.registry.find((x) => x.id === a.project)
                 return (
-                  <tr key={i}>
+                  <tr key={i} className={'act-' + (a.bad ? 'bad' : TONE[a.action] || 'idle')}>
                     <td>
                       <span>{ago(a.t)}</span>
                       <span className="muted small num"> {clock(a.t).slice(0, 5)}</span>
                     </td>
                     <td>
-                      <b>{a.action}</b>
+                      <b className="act-badge">{a.action}</b>
                     </td>
                     <td>
                       {p ? (

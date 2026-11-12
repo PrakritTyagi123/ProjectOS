@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useStore } from './store'
 import { PLAN_STATES, WEEK } from './data'
-import { Icon, Glyph, Button } from './ui'
+import { Icon, Glyph, Button, catVar } from './ui'
 
 function Card({ p }) {
   const { state, engine } = useStore()
@@ -17,7 +17,7 @@ function Card({ p }) {
     engine.toast(`${p.name} moved to ${PLAN_STATES[to].label}.`)
   }
   return (
-    <li className={'pcard pcard-' + pl.state}>
+    <li className={'pcard pcard-' + pl.state} style={{ '--c': catVar(p.category) }}>
       <a href={'#project-' + p.id} className="pcard-h">
         <Glyph p={p} size={26} />
         <b>{p.name}</b>
@@ -28,7 +28,7 @@ function Card({ p }) {
           <div className="bar">
             <span className="bar-fill bar-good" style={{ width: (done / pl.dod.length) * 100 + '%' }} />
           </div>
-          <span className="num small muted">
+          <span className="num small">
             {done}/{pl.dod.length}
           </span>
         </div>

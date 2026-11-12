@@ -29,13 +29,13 @@ function bootLog(p, t0) {
 function initialRuntime() {
   const now = Date.now()
   const rt = {}
-  for (const p of PROJECTS) rt[p.id] = { status: 'stopped', logs: [], cpu: 0, ram: 0, vram: 0, lastExit: null }
+  for (const p of PROJECTS) rt[p.id] = { status: 'stopped', logs: [], cpu: 0, ram: 0, vram: 0, lastExit: null, hist: Array(30).fill(0) }
   const run = (id, agoMin) => {
     const p = PROJECTS.find((x) => x.id === id)
     const t0 = now - agoMin * 60000
     const logs = bootLog(p, t0)
     for (let i = 0; i < 14 && p.traffic.length; i++) logs.push(line('out', p.traffic[i % p.traffic.length], t0 + p.bootMs + 60000 * (i + 1) * (agoMin / 16)))
-    rt[id] = { ...rt[id], status: 'running', pid: pid(), startedAt: t0, readyMs: p.bootMs, logs, ...p.profile, health: { ok: true, ms: 12, at: now } }
+    rt[id] = { ...rt[id], hist: Array.from({ length: 30 }, () => jitter(p.profile.cpu, 0.5)), status: 'running', pid: pid(), startedAt: t0, readyMs: p.bootMs, logs, ...p.profile, health: { ok: true, ms: 12, at: now } }
   }
   run('projectos', 60 * 26 + 12)
   run('comfyui', 38)
@@ -130,6 +130,9 @@ function reducer(s, a) {
           cpu += runtime[p.id].cpu / 2
           if (p.gpu) gpu += p.profile.vram * rnd(2, 5)
         }
+        const rr = runtime[p.id]
+        const v = rr.status === 'running' ? rr.cpu : rr.status === 'starting' ? rnd(30, 80) : 0
+        runtime[p.id] = { ...rr, hist: (rr.hist || []).slice(-29).concat(v) }
       }
       return {
         ...s,
@@ -150,7 +153,7 @@ function reducer(s, a) {
       return {
         ...s,
         registry: [...s.registry, a.project],
-        runtime: { ...s.runtime, [a.project.id]: { status: 'stopped', logs: [line('agent', 'registered from dashboard (demo)')], cpu: 0, ram: 0, vram: 0 } },
+        runtime: { ...s.runtime, [a.project.id]: { status: 'stopped', hist: Array(30).fill(0), logs: [line('agent', 'registered from dashboard (demo)')], cpu: 0, ram: 0, vram: 0 } },
         plan: { ...s.plan, [a.project.id]: { state: 'parked', milestone: 'Define first release', dod: [], next: 'Write the definition of done.', blocker: '', experiment: '', resume: '', ideas: [], sessions: [] } },
       }
     case 'TOAST':
@@ -182,7 +185,7 @@ export function StoreProvider({ children }) {
           dispatch({ type: 'LOG', id: p.id, lines: [line('out', p.traffic[Math.floor(Math.random() * p.traffic.length)])] })
         }
       }
-    }, 2000)
+    }, 1200)
     return () => clearInterval(iv)
   }, [])
 
