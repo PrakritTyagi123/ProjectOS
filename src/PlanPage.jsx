@@ -218,7 +218,7 @@ export default function PlanPage() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Plan</h1>
+          <h1>Focus & Plan</h1>
           <p className="muted">One active personal project. Office work sits in Committed and doesn’t count against it.</p>
         </div>
       </header>

@@ -39,6 +39,10 @@ your email*. Do this before the real agent is connected.
 | File | What it is |
 |---|---|
 | `src/data.js` | All demo projects, machines, plan, inbox, weekly hours. **Edit this first.** |
+| `src/extra.js` | Demo tasks, git, deployments, games, AI jobs, modules and launch profiles. |
+| `src/App.jsx` | Shell: collapsible sidebar, toolbar with project jump (`/`), routing, shared Start/Stop/Open/More actions. |
+| `src/Projects.jsx` | Project library: dense list with expandable rows, or grid. |
+| `src/Runtime.jsx`, `Machines.jsx`, `Deploy.jsx`, `Repos.jsx`, `Tasks.jsx`, `Games.jsx`, `AIStudio.jsx`, `Settings.jsx` | One page each. |
 | `src/store.jsx` | Simulated agent: start/stop/restart, health, logs, VRAM checks. |
 | `src/Overview.jsx` | Active-project band, machine panel, project list. |
 | `src/ProjectPage.jsx` | Per-project page: Overview, Logs, Config, Plan, Models. |
@@ -71,5 +75,5 @@ app, have the agent serve `README.md` and `docs/media/*` from each project folde
 - `GET /api/projects/{id}/readme` → markdown
 - `GET /api/projects/{id}/media/{file}` → the file (supports Range for video)
 
-Plan edits are saved in this browser's localStorage only. "Reset demo" in the
-sidebar clears them.
+Plan, tasks, modules and profiles are saved in this browser's localStorage only.
+Settings → Reset demo clears them.

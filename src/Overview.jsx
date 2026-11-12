@@ -1,406 +1,375 @@
-import { useState } from 'react'
 import { useStore, statusOf } from './store'
-import { CATEGORIES, MACHINES } from './data'
-import { Icon, Glyph, PlanChip, Gauge, Ring, LiveBars, Led, STATUS, Button, Num, Knob, uptime, ago, useNow, gb, catVar } from './ui'
-import { Power } from './App'
+import { MACHINES, PLAN_STATES } from './data'
+import { Icon, Glyph, Sparkline, Status, Num, Led, Gauge, uptime, ago, useNow, gb } from './ui'
+import { Actions, go } from './App'
 import { useWeek, todayIdx, sessionStart } from './week'
 
-function ActiveCard() {
-  const { state } = useStore()
-  const p = state.registry.find((x) => state.plan[x.id]?.state === 'active')
-  if (!p)
-    return (
-      <section className="hud-card active-card active-empty">
-        <h2>No active project</h2>
-        <p>Promote one queued project and give it a small milestone.</p>
-        <a className="btn btn-primary" href="#plan">Open the plan</a>
-      </section>
-    )
-  const pl = state.plan[p.id]
-  const done = pl.dod.filter((d) => d.d).length
+const LIVE = ['running', 'starting', 'stopping']
+
+function Well({ label, value, unit, sub, children }) {
   return (
-    <section className="hud-card active-card" aria-label="Active project">
-      <div className="ac-top">
-        <span className="ac-tag">Active project</span>
-        {pl.sprint && (
-          <span className="sprint" aria-label={`Sprint day ${pl.sprint.day} of ${pl.sprint.of}`}>
-            {Array.from({ length: pl.sprint.of }, (_, i) => (
-              <i key={i} className={i < pl.sprint.day - 1 ? 'past' : i === pl.sprint.day - 1 ? 'today' : ''} />
-            ))}
-            <em className="num">
-              Day {pl.sprint.day}/{pl.sprint.of}
-            </em>
-          </span>
-        )}
+    <div className="well">
+      <div className="well-h">
+        <span>{label}</span>
+        {sub && <span className="well-sub num">{sub}</span>}
       </div>
-      <div className="ac-body">
-        <Ring done={done} total={pl.dod.length} />
-        <div className="ac-text">
-          <h2>
-            <a href={'#project-' + p.id}>{p.name.replace(' Agent', '')}</a>
-          </h2>
-          <div className="ac-ms">{pl.milestone}</div>
-          <div className="dod-seg" role="list" aria-label="Definition of done">
-            {pl.dod.map((d, i) => (
-              <span key={i} role="listitem" className={d.d ? 'on' : ''} title={(d.d ? 'Done: ' : 'To do: ') + d.t} style={{ '--i': i }} />
-            ))}
-          </div>
-        </div>
+      <div className="well-v num">
+        {value}
+        {unit && <small>{unit}</small>}
       </div>
-      <div className="ac-next">
-        <span className="ac-label">Next action</span>
-        <p>{pl.next}</p>
-      </div>
-      {pl.blocker && (
-        <div className="ac-block">
-          <Icon name="warn" size={14} />
-          <span>{pl.blocker}</span>
-        </div>
-      )}
-      {pl.sessions[0] && (
-        <div className="ac-last">
-          <span>Last session</span>
-          <b className="num">{pl.sessions[0].mins} min</b>
-          <span>{pl.sessions[0].note}</span>
-        </div>
-      )}
-    </section>
+      {children}
+    </div>
   )
 }
 
-function MachineCard() {
+export function SystemPanel({ big }) {
   const { state } = useStore()
   const m = MACHINES['desktop-01']
   const on = state.machines['desktop-01']
   const procs = state.registry.filter((p) => p.machine === 'desktop-01' && state.runtime[p.id].status === 'running')
   const ram = on ? 7.2 + procs.reduce((a, p) => a + state.runtime[p.id].ram, 0) : 0
-  const vramUsers = procs.filter((p) => state.runtime[p.id].vram > 0)
-  const vram = on ? 0.6 + vramUsers.reduce((a, p) => a + state.runtime[p.id].vram, 0) : 0
+  const users = procs.filter((p) => state.runtime[p.id].vram > 0).sort((a, b) => state.runtime[b.id].vram - state.runtime[a.id].vram)
+  const vram = on ? 0.6 + users.reduce((a, p) => a + state.runtime[p.id].vram, 0) : 0
   const cpu = on ? state.hist.cpu[state.hist.cpu.length - 1] : 0
   const gpu = on ? state.hist.gpu[state.hist.gpu.length - 1] : 0
   return (
-    <section className={'hud-card machine ' + (on ? '' : 'is-off')} aria-label="Machine">
-      <div className="hud-h">
-        <h3>desktop-01</h3>
-        <span className="muted small">
-          {m.gpu} {m.vramGb} GB, {m.ramGb} GB RAM
-        </span>
-      </div>
-      <div className="gauges">
-        <Gauge value={cpu} label="CPU" color="var(--c-web)" />
-        <Gauge value={gpu} label="GPU load" color="var(--c-ai)" />
-        <Gauge value={ram} max={m.ramGb} unit="G" label="RAM" color="var(--c-tools)" />
-        <Gauge value={vram} max={m.vramGb} unit="G" label="VRAM" color="var(--c-games)" />
-      </div>
-      <div className="vram-strip" role="img" aria-label={`VRAM ${vram.toFixed(1)} of ${m.vramGb} GB`}>
-        {on && <span className="vs-seg vs-sys" style={{ width: (0.6 / m.vramGb) * 100 + '%' }} title="System 0.6 GB" />}
-        {on &&
-          vramUsers.map((p) => (
-            <span key={p.id} className="vs-seg" style={{ width: (state.runtime[p.id].vram / m.vramGb) * 100 + '%', '--h': p.hue }} title={`${p.name} ${gb(state.runtime[p.id].vram)}`}>
-              {p.name}
-            </span>
-          ))}
-      </div>
-      <ul className="legend">
-        {on && vramUsers.map((p) => (
-          <li key={p.id}>
-            <span className="sw" style={{ background: `hsl(${p.hue} 75% 55%)` }} />
-            {p.name} {gb(state.runtime[p.id].vram)}
-          </li>
-        ))}
-        <li>Free {(m.vramGb - vram).toFixed(1)} GB</li>
-      </ul>
-      <div className="hist">
-        <div className="hist-row">
-          <span className="small muted">CPU, last minute</span>
-          <LiveBars data={on ? state.hist.cpu.slice(-36) : Array(36).fill(0)} color="var(--c-web)" />
+    <section className={'panel sys ' + (on ? '' : 'is-off')} aria-label="System">
+      <header className="panel-h">
+        <div>
+          <h2>desktop-01</h2>
+          <span className="muted small">
+            {m.os}, {m.gpu} {m.vramGb} GB, {m.ramGb} GB RAM
+          </span>
         </div>
-        <div className="hist-row">
-          <span className="small muted">GPU, last minute</span>
-          <LiveBars data={on ? state.hist.gpu.slice(-36) : Array(36).fill(0)} color="var(--c-ai)" />
+        <div className="conn">
+          <Status status={on ? 'running' : 'offline'} label={on ? 'Agent online' : 'Agent offline'} />
+          <Status status={on ? 'running' : 'offline'} label={on ? 'Tunnel connected' : 'Tunnel down'} />
+          <Status status="running" label="Access on" />
+        </div>
+      </header>
+      <div className="dials">
+        <Gauge value={cpu} label="CPU" />
+        <Gauge value={gpu} label="GPU load" />
+        <Gauge value={ram} max={m.ramGb} unit="G" label="Memory" />
+        <Gauge value={vram} max={m.vramGb} unit="G" label="VRAM" color={vram / m.vramGb > 0.85 ? 'var(--busy)' : 'var(--accent)'} />
+      </div>
+      <div className="hist-wells">
+        <div className="well">
+          <div className="well-h"><span>CPU, last minute</span><span className="num">{Math.round(cpu)}%</span></div>
+          <Sparkline data={on ? state.hist.cpu : state.hist.cpu.map(() => 0)} height={big ? 50 : 34} />
+        </div>
+        <div className="well">
+          <div className="well-h"><span>GPU, last minute</span><span className="num">{Math.round(gpu)}%</span></div>
+          <Sparkline data={on ? state.hist.gpu : state.hist.gpu.map(() => 0)} height={big ? 50 : 34} />
+        </div>
+      </div>
+      <div className="alloc">
+        <div className="alloc-h small">
+          <span>VRAM by process</span>
+          <span className="muted num">{(m.vramGb - vram).toFixed(1)} GB free</span>
+        </div>
+        <div className="vram-strip">
+          {on && <span className="vs-seg vs-sys" style={{ width: (0.6 / m.vramGb) * 100 + '%' }} title="Windows 0.6 GB" />}
+          {on &&
+            users.map((p, i) => (
+              <span key={p.id} className={'vs-seg vs-' + (i % 4)} style={{ width: (state.runtime[p.id].vram / m.vramGb) * 100 + '%' }} title={`${p.name} ${gb(state.runtime[p.id].vram)}`}>
+                {p.name} {state.runtime[p.id].vram.toFixed(1)}
+              </span>
+            ))}
         </div>
       </div>
     </section>
   )
 }
 
-function LiveCard() {
+function FocusPanel() {
   const { state } = useStore()
-  const live = state.registry.filter((p) => ['running', 'starting', 'stopping'].includes(statusOf(state, p)))
-  const counts = state.registry.reduce((a, p) => ((a[statusOf(state, p)] = (a[statusOf(state, p)] || 0) + 1), a), {})
-  const n = state.registry.length
-  const quick = state.registry
-    .filter((p) => ['active', 'committed', 'queued'].includes(state.plan[p.id].state) && ['stopped', 'failed'].includes(statusOf(state, p)) && !p.self)
-    .slice(0, 3)
-  const segs = [
-    ['running', counts.running || 0],
-    ['starting', (counts.starting || 0) + (counts.stopping || 0)],
-    ['failed', counts.failed || 0],
-    ['stopped', counts.stopped || 0],
-    ['offline', counts.offline || 0],
-  ]
+  const p = state.registry.find((x) => state.plan[x.id]?.state === 'active')
+  if (!p)
+    return (
+      <section className="panel focus focus-empty">
+        <h2>Current focus</h2>
+        <p className="muted">No active project. Pick one queued project and give it a small, finishable milestone.</p>
+        <a className="btn btn-primary btn-sm" href="#focus">
+          Choose on the focus board
+        </a>
+      </section>
+    )
+  const pl = state.plan[p.id]
+  const done = pl.dod.filter((d) => d.d).length
   return (
-    <section className="hud-card live" aria-label="Running now">
-      <div className="hud-h">
-        <h3>Running now</h3>
-        <span className="num muted small">
-          {live.length} of {n}
+    <section className="panel focus" aria-label="Current focus">
+      <header className="panel-h">
+        <h2>Current focus</h2>
+        {pl.sprint && (
+          <span className="muted small num">
+            Day {pl.sprint.day} of {pl.sprint.of}
+          </span>
+        )}
+      </header>
+      <div className="focus-id">
+        <Glyph p={p} size={36} />
+        <div>
+          <a href={'#project-' + p.id} className="focus-name">
+            {p.name.replace(' Agent', '')}
+          </a>
+          <div className="muted small">{pl.milestone}</div>
+        </div>
+      </div>
+      <div className="focus-prog">
+        <div className="dod-seg" aria-label={`${done} of ${pl.dod.length} done`}>
+          {pl.dod.map((d, i) => (
+            <span key={i} className={d.d ? 'on' : ''} title={d.t} style={{ '--i': i }} />
+          ))}
+        </div>
+        <span className="small num">
+          {done}/{pl.dod.length} done
         </span>
       </div>
-      <div className="mix" aria-hidden="true">
-        {segs.map(([k, v]) => v > 0 && <span key={k} className={'mix-' + STATUS[k].tone} style={{ flex: v }} />)}
+      <div className="inset-note">
+        <span className="label">Next action</span>
+        <p>{pl.next}</p>
       </div>
-      <div className="mix-legend small">
-        {segs.map(([k, v]) => v > 0 && (
-          <span key={k}>
-            <Led status={k} /> <b className="num"><Num value={v} ms={400} /></b> {k === 'starting' ? 'changing' : STATUS[k].label.toLowerCase()}
-          </span>
-        ))}
+      {pl.blocker && (
+        <div className="focus-block small">
+          <Icon name="warn" size={14} />
+          <span>{pl.blocker}</span>
+        </div>
+      )}
+      <div className="row-btns">
+        <a className="btn btn-sm" href={'#project-' + p.id}>
+          Open workspace
+        </a>
+        <a className="btn btn-sm" href="#focus">
+          Focus board
+        </a>
       </div>
-      <ul className="live-list">
-        {live.map((p) => {
-          const r = state.runtime[p.id]
-          return (
-            <li key={p.id} style={{ '--c': catVar(p.category) }}>
-              <a href={'#project-' + p.id}>
-                <Led status={statusOf(state, p)} />
-                <span className="ll-name">{p.name}</span>
-                <LiveBars data={r.hist.slice(-12)} color={catVar(p.category)} />
-                <span className="num small muted">{r.status === 'running' ? uptime(r.startedAt) : '…'}</span>
-              </a>
-            </li>
-          )
-        })}
-        {live.length === 0 && <li className="muted small">Nothing running. Backends start on demand.</li>}
-      </ul>
-      {quick.length > 0 && (
-        <>
-          <div className="hud-h quick-h">
-            <h3>Quick start</h3>
-            <span className="muted small">Active, committed and queued</span>
-          </div>
-          <ul className="quick">
-            {quick.map((p) => (
-              <li key={p.id} style={{ '--c': catVar(p.category) }}>
-                <Power p={p} />
-                <a href={'#project-' + p.id}>{p.name}</a>
-                <span className="small muted">{statusOf(state, p) === 'failed' ? 'failed last time' : p.kind}</span>
-              </li>
-            ))}
-          </ul>
-        </>
+    </section>
+  )
+}
+
+function RunningPanel() {
+  const { state } = useStore()
+  useNow(1000)
+  const live = state.registry.filter((p) => LIVE.includes(statusOf(state, p)))
+  return (
+    <section className="panel flat-panel" aria-label="Running services">
+      <header className="panel-h">
+        <h2>Running services</h2>
+        <a href="#runtime" className="small">
+          Runtime
+        </a>
+      </header>
+      {live.length ? (
+        <div className="table-wrap">
+          <table className="dense">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th className="r">Port</th>
+                <th className="r">Uptime</th>
+                <th className="r">CPU</th>
+                <th className="r">VRAM</th>
+                <th className="r">Health</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {live.map((p) => {
+                const r = state.runtime[p.id]
+                const st = statusOf(state, p)
+                return (
+                  <tr key={p.id} onClick={() => go('project-' + p.id)}>
+                    <td>
+                      <span className="cell-name">
+                        <Led status={st} />
+                        <b>{p.name}</b>
+                      </span>
+                    </td>
+                    <td className="r num muted">{p.port || '–'}</td>
+                    <td className="r num">{st === 'running' ? uptime(r.startedAt) : st === 'starting' ? 'starting' : 'stopping'}</td>
+                    <td className="r num">{st === 'running' ? r.cpu.toFixed(0) + '%' : '–'}</td>
+                    <td className="r num">{st === 'running' && p.gpu ? r.vram.toFixed(1) + ' GB' : '–'}</td>
+                    <td className="r num">{st === 'running' ? (p.health ? `${r.health?.ms ?? '–'} ms` : 'alive') : '–'}</td>
+                    <td className="r">
+                      <Actions p={p} more={false} />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="muted empty-line">Nothing running. Backends start on demand from Projects.</p>
       )}
     </section>
   )
 }
 
-function Module({ p, i }) {
+function AttentionPanel() {
   const { state } = useStore()
-  const r = state.runtime[p.id]
-  const st = statusOf(state, p)
-  const pl = state.plan[p.id]
-  const last = r.logs[r.logs.length - 1]
-  const lastErr = [...r.logs].reverse().find((l) => l.stream === 'err')
-  let line
-  if (st === 'starting') line = <span className="mod-line busy">{last?.text}</span>
-  else if (st === 'failed') line = <span className="mod-line bad">{lastErr?.text || r.error}</span>
-  else if (st === 'offline') line = <span className="mod-line">{MACHINES[p.machine].label} not linked</span>
-  else if (st === 'running') line = <span className="mod-line">{last?.text}</span>
-  else if (p.job && r.lastRunAt) line = <span className="mod-line">Last run {ago(r.lastRunAt)}, exit {r.lastExit}</span>
-  else line = <span className="mod-line">{p.blurb}</span>
-
+  const [week] = useWeek()
+  const items = []
+  state.registry.forEach((p) => {
+    const st = statusOf(state, p)
+    const r = state.runtime[p.id]
+    if (st === 'failed') items.push({ tone: 'bad', p, text: `${p.name} failed to start`, sub: `Exit code ${r.lastExit}, ${ago(r.failedAt)}`, action: ['View error', () => go('project-' + p.id)] })
+  })
+  const off = state.registry.filter((p) => statusOf(state, p) === 'offline')
+  if (off.length) items.push({ tone: 'off', text: `${off.length} project${off.length > 1 ? 's' : ''} on an unlinked machine`, sub: off.map((p) => p.name).join(', '), action: ['Machines', () => go('machines')] })
+  state.registry.forEach((p) => {
+    const pl = state.plan[p.id]
+    if (pl.blocker && ['active', 'committed'].includes(pl.state)) items.push({ tone: 'warn', p, text: `${p.name} is blocked`, sub: pl.blocker, action: ['Plan', () => go('project-' + p.id)] })
+  })
+  const vram = 0.6 + state.registry.filter((p) => state.runtime[p.id].status === 'running').reduce((a, p) => a + state.runtime[p.id].vram, 0)
+  if (vram / 16 > 0.85) items.push({ tone: 'warn', text: 'VRAM above 85%', sub: `${vram.toFixed(1)} of 16 GB in use`, action: ['Runtime', () => go('runtime')] })
+  const planned = week.reduce((a, d) => a + (d.rest ? 0 : d.plan), 0)
+  if (planned > 10) items.push({ tone: 'warn', text: 'Week is over capacity', sub: `${planned} h planned, 10 h is the limit`, action: ['Adjust', () => go('focus')] })
+  if (!week.some((d) => d.rest)) items.push({ tone: 'warn', text: 'No rest evening this week', sub: 'Keep at least one evening free', action: ['Adjust', () => go('focus')] })
   return (
-    <li className={'mod mod-' + st} style={{ '--c': catVar(p.category), '--i': i }}>
-      <div className="mod-head">
-        <Glyph p={p} size={38} />
-        <a className="mod-name" href={'#project-' + p.id}>
-          <b>{p.name}</b>
-          <span>
-            {p.kind}
-            {p.port ? `, ${p.udp ? 'UDP' : 'port'} ${p.port}` : ''}
-          </span>
-        </a>
-        <a className="mod-doc" href={'#readme-' + p.id} title={`${p.name} README`} aria-label={`${p.name} README`}>
-          <Icon name="doc" size={15} />
-        </a>
-        <Power p={p} />
-      </div>
-      <div className="mod-viz">
-        <LiveBars data={r.hist} color={catVar(p.category)} />
-        {st === 'starting' && <span className="scan" />}
-      </div>
-      {line}
-      <div className="mod-foot">
-        <span className={'st st-' + STATUS[st].tone}>
-          <Led status={st} />
-          {STATUS[st].label}
-        </span>
-        <span className="mod-stats num">
-          {st === 'running' ? (
-            <>
-              <span>{uptime(r.startedAt)}</span>
-              <span>{r.cpu.toFixed(0)}% cpu</span>
-              {p.gpu && <span>{r.vram.toFixed(1)}G vram</span>}
-            </>
-          ) : (
-            <span className="muted">{CATEGORIES[p.category]}</span>
-          )}
-        </span>
-        <PlanChip state={pl.state} />
-      </div>
-    </li>
+    <section className="panel" aria-label="Needs attention">
+      <header className="panel-h">
+        <h2>Needs attention</h2>
+        <span className="count-chip num">{items.length}</span>
+      </header>
+      {items.length ? (
+        <ul className="attn">
+          {items.map((it, i) => (
+            <li key={i} className={'attn-' + it.tone}>
+              <span className="attn-dot" />
+              <div>
+                <b>{it.text}</b>
+                <span className="small muted">{it.sub}</span>
+              </div>
+              <button className="btn btn-sm" onClick={it.action[1]}>
+                {it.action[0]}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted empty-line">Nothing needs attention.</p>
+      )}
+    </section>
   )
 }
 
-// A day from 06:00 to 24:00: office block, planned session, rest, and a "now" knob.
 const D0 = 6
 const D1 = 24
 const pos = (h) => ((Math.min(D1, Math.max(D0, h)) - D0) / (D1 - D0)) * 100
 const fmtH = (h) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`
-const span = (mins) => (mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`)
+const span = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`)
 
-function DayStrip() {
-  const { state } = useStore()
+function TodayPanel() {
   const [week] = useWeek()
   useNow(30000)
   const i = todayIdx()
   const day = week[i]
   const d = new Date()
   const now = d.getHours() + d.getMinutes() / 60
-  const isWeekend = i >= 5
+  const weekend = i >= 5
   const s0 = sessionStart(i)
   const s1 = s0 + day.plan
-  const active = state.registry.find((p) => state.plan[p.id]?.state === 'active')
   let msg
-  if (!isWeekend && now >= 9 && now < 17.5) msg = `Office until 17:30. Personal time in ${span(Math.round((17.5 - now) * 60))}.`
-  else if (day.rest || !day.plan) msg = 'Rest day. No project work planned tonight.'
-  else if (now < s0) msg = `${active?.name.replace(' Agent', '') || 'Project'} session at ${fmtH(s0)} for ${day.plan} h. Starts in ${span(Math.round((s0 - now) * 60))}.`
-  else if (now < s1) msg = `Session in progress until ${fmtH(s1)}.`
-  else msg = 'Done for today. Write a handoff note and sleep.'
-  const marks = [6, 9, 12, 15, 18, 21, 24]
+  if (!weekend && now >= 9 && now < 17.5) msg = `Office until 17:30. Personal time in ${span(Math.round((17.5 - now) * 60))}.`
+  else if (day.rest || !day.plan) msg = 'Rest evening. No project work planned.'
+  else if (now < s0) msg = `Session at ${fmtH(s0)} for ${day.plan} h.`
+  else if (now < s1) msg = `Session until ${fmtH(s1)}.`
+  else msg = 'Done for today. Write the handoff note.'
+  const planned = week.reduce((a, x) => a + (x.rest ? 0 : x.plan), 0)
+  const done = week.reduce((a, x) => a + x.done, 0)
   return (
-    <section className="hud-card daystrip" aria-label="Today">
-      <div className="ds-head">
-        <div>
-          <h3>{d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}</h3>
-          <p className="muted small">{msg}</p>
-        </div>
-        <div className="ds-legend small">
-          <span><i className="ds-sw ds-sw-office" />Office</span>
-          <span><i className="ds-sw ds-sw-session" />Planned session</span>
-          <span><i className="ds-sw ds-sw-sleep" />Sleep</span>
-        </div>
-      </div>
+    <section className="panel today" aria-label="Today">
+      <header className="panel-h">
+        <h2>Today</h2>
+        <span className="muted small">{d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+      </header>
+      <p className="small">{msg}</p>
       <div className="ds-track">
-        {!isWeekend && (
-          <span className="ds-block ds-office" style={{ left: pos(9) + '%', width: pos(17.5) - pos(9) + '%' }}>
-            Office
-          </span>
-        )}
-        {day.plan > 0 && !day.rest && (
-          <span className="ds-block ds-session" style={{ left: pos(s0) + '%', width: pos(s1) - pos(s0) + '%' }}>
-            {day.plan} h
-          </span>
-        )}
-        <span className="ds-block ds-sleep" style={{ left: pos(23.5) + '%', width: 100 - pos(23.5) + '%' }} />
-        <span className="ds-now" style={{ left: pos(now) + '%' }}>
-          <b className="num">{fmtH(now)}</b>
-        </span>
+        {!weekend && <span className="ds-block ds-office" style={{ left: pos(9) + '%', width: pos(17.5) - pos(9) + '%' }}>Office</span>}
+        {day.plan > 0 && !day.rest && <span className="ds-block ds-session" style={{ left: pos(s0) + '%', width: pos(s1) - pos(s0) + '%' }} title={`${fmtH(s0)} to ${fmtH(s1)}`} />}
+        <span className="ds-now" style={{ left: pos(now) + '%' }} title={fmtH(now)} />
       </div>
       <div className="ds-scale">
-        {marks.map((m) => (
+        {[6, 12, 18, 24].map((m) => (
           <span key={m} style={{ left: pos(m) + '%' }} className="num">
             {String(m % 24).padStart(2, '0')}
           </span>
         ))}
       </div>
+      <div className="week-mini" aria-label={`${done} of ${planned} hours this week`}>
+        {week.map((x, j) => (
+          <div key={x.d} className={'wm ' + (j === i ? 'wm-today' : '') + (x.rest ? ' wm-rest' : '')} title={`${x.d}: ${x.rest ? 'rest' : `${x.done} of ${x.plan} h`}`}>
+            <div className="wm-bar">
+              <i style={{ height: (Math.min(x.plan, 4) / 4) * 100 + '%' }} />
+              <b style={{ height: (Math.min(x.done, 4) / 4) * 100 + '%' }} />
+            </div>
+            <span>{x.d[0]}</span>
+          </div>
+        ))}
+        <div className="wm-total">
+          <b className="num">{done.toFixed(1)}</b>
+          <span className="muted small num">of {planned} h</span>
+        </div>
+      </div>
     </section>
   )
 }
 
-export default function Overview({ onAdd }) {
+function RecentPanel() {
   const { state } = useStore()
-  useNow(1000)
-  const [cat, setCat] = useState('all')
-  const [stf, setStf] = useState('all')
-  const [q, setQ] = useState('')
-
-  const list = state.registry.filter((p) => {
-    if (cat !== 'all' && p.category !== cat) return false
-    const st = statusOf(state, p)
-    if (stf === 'running' && !['running', 'starting', 'stopping'].includes(st)) return false
-    if (stf === 'stopped' && !['stopped', 'offline'].includes(st)) return false
-    if (stf === 'failed' && st !== 'failed') return false
-    if (q && !(p.name + ' ' + p.blurb + ' ' + p.kind).toLowerCase().includes(q.toLowerCase())) return false
-    return true
-  })
-  const order = { failed: 0, starting: 1, stopping: 1, running: 2, stopped: 3, offline: 4 }
-  list.sort((a, b) => order[statusOf(state, a)] - order[statusOf(state, b)])
-
+  useNow(10000)
+  const seen = new Set()
+  const recent = []
+  for (const a of state.activity) {
+    if (a.project && !seen.has(a.project)) {
+      seen.add(a.project)
+      const p = state.registry.find((x) => x.id === a.project)
+      if (p && !p.self) recent.push({ p, a })
+    }
+    if (recent.length >= 5) break
+  }
   return (
-    <div className="page">
-      <div className="hud">
-        <ActiveCard />
-        <MachineCard />
-        <LiveCard />
-      </div>
-      <DayStrip />
-
-      <section className="projects" aria-label="Projects">
-        <div className="toolbar">
-          <div className="chips" role="tablist" aria-label="Category">
-            {[['all', 'All'], ...Object.entries(CATEGORIES)].map(([k, v]) => (
-              <button key={k} role="tab" aria-selected={cat === k} className={'chip ' + (cat === k ? 'on' : '')} style={{ '--c': k === 'all' ? 'var(--ink)' : catVar(k) }} onClick={() => setCat(k)}>
-                {k !== 'all' && <i className="chip-dot" />}
-                {v}
-                <span className="chip-n num">{k === 'all' ? state.registry.length : state.registry.filter((p) => p.category === k).length}</span>
-              </button>
-            ))}
-          </div>
-          <div className="tools-r">
-            <div className="seg has-knob" aria-label="Status filter">
-              <Knob />
-              {['all', 'running', 'stopped', 'failed'].map((k) => (
-                <button key={k} className={stf === k ? 'on' : ''} onClick={() => setStf(k)}>
-                  {k[0].toUpperCase() + k.slice(1)}
-                </button>
-              ))}
-            </div>
-            <label className="search">
-              <Icon name="search" />
-              <input id="search" type="search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
-            </label>
-          </div>
-        </div>
-        {list.length ? (
-          <ul className="mods">
-            {list.map((p, i) => (
-              <Module key={p.id} p={p} i={i} />
-            ))}
-            <li className="mod mod-add" style={{ '--i': list.length }}>
-              <button onClick={onAdd}>
-                <Icon name="plus" size={20} />
-                <b>Register a project</b>
-                <span>Point the agent at an existing folder. No code changes.</span>
-              </button>
+    <section className="panel flat-panel" aria-label="Recent projects">
+      <header className="panel-h">
+        <h2>Recent projects</h2>
+        <a href="#projects" className="small">
+          All {state.registry.length} projects
+        </a>
+      </header>
+      <ul className="recent">
+        {recent.map(({ p, a }) => {
+          const st = statusOf(state, p)
+          return (
+            <li key={p.id} onClick={() => go('project-' + p.id)}>
+              <Glyph p={p} size={28} />
+              <div className="recent-name">
+                <b>{p.name}</b>
+                <span className="small muted">
+                  {a.action} {ago(a.t)}
+                </span>
+              </div>
+              <span className="prio small">{PLAN_STATES[state.plan[p.id].state].label}</span>
+              <Status status={st} />
+              <Actions p={p} open={false} />
             </li>
-          </ul>
-        ) : (
-          <div className="empty">
-            <p>No projects match these filters.</p>
-            <button
-              className="link"
-              onClick={() => {
-                setCat('all')
-                setStf('all')
-                setQ('')
-              }}
-            >
-              Clear filters
-            </button>
-          </div>
-        )}
-      </section>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+export default function Overview() {
+  return (
+    <div className="page ov">
+      <SystemPanel />
+      <FocusPanel />
+      <RunningPanel />
+      <AttentionPanel />
+      <RecentPanel />
+      <TodayPanel />
     </div>
   )
 }

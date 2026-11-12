@@ -3,10 +3,11 @@
 // GET /api/host/metrics and GET /api/projects.
 import { createContext, useContext, useEffect, useReducer, useRef, useMemo } from 'react'
 import { PROJECTS, INITIAL_PLAN, INITIAL_INBOX, MACHINES } from './data'
+import { INITIAL_TASKS, INITIAL_DEPLOYS, INITIAL_JOBS, EXTRA_ACTIVITY, defaultModules, profilesFor } from './extra'
 
 const MAX_LOG = 400
 const HIST = 48
-const STORE_KEY = 'projectos-demo-plan-v1'
+const STORE_KEY = 'projectos-demo-v2'
 
 const rnd = (a, b) => a + Math.random() * (b - a)
 const jitter = (v, pct = 0.15) => Math.max(0, v * (1 + rnd(-pct, pct)))
@@ -78,6 +79,9 @@ function initialActivity() {
   ]
 }
 
+const TYPE_OF = { Start: 'runtime', Stop: 'runtime', Restart: 'runtime', 'Run job': 'runtime', 'Sign-in': 'access', Register: 'registry', Redeploy: 'deploy' }
+const withType = (a) => ({ machine: 'desktop-01', type: TYPE_OF[a.action] || 'runtime', ...a })
+
 function loadSaved() {
   try {
     const raw = localStorage.getItem(STORE_KEY)
@@ -96,7 +100,12 @@ function init() {
     runtime: initialRuntime(),
     plan: saved?.plan || INITIAL_PLAN,
     inbox: saved?.inbox || INITIAL_INBOX,
-    activity: initialActivity(),
+    activity: [...initialActivity(), ...EXTRA_ACTIVITY].map(withType).sort((a, b) => b.t - a.t),
+    tasks: saved?.tasks || INITIAL_TASKS,
+    modules: saved?.modules || Object.fromEntries(PROJECTS.map((p) => [p.id, defaultModules(p)])),
+    profile: saved?.profile || Object.fromEntries(PROJECTS.map((p) => [p.id, profilesFor(p)[0]])),
+    deploys: INITIAL_DEPLOYS,
+    jobs: INITIAL_JOBS,
     hist: { cpu: Array.from({ length: HIST }, () => rnd(14, 26)), gpu: Array.from({ length: HIST }, () => rnd(20, 45)) },
     toast: null,
   }
@@ -134,9 +143,15 @@ function reducer(s, a) {
         const v = rr.status === 'running' ? rr.cpu : rr.status === 'starting' ? rnd(30, 80) : 0
         runtime[p.id] = { ...rr, hist: (rr.hist || []).slice(-29).concat(v) }
       }
+      const jobs = s.jobs.map((j) => {
+        if (j.state !== 'running') return j
+        const progress = Math.min(1, j.progress + 0.012)
+        return { ...j, progress, eta: Math.max(0, Math.round(j.eta * (1 - 0.012 / Math.max(0.01, 1 - j.progress)))), state: progress >= 1 ? 'done' : 'running' }
+      })
       return {
         ...s,
         runtime,
+        jobs,
         lastSeen: s.machines['desktop-01'] ? Date.now() : s.lastSeen,
         hist: { cpu: s.hist.cpu.slice(1).concat(Math.min(100, cpu)), gpu: s.hist.gpu.slice(1).concat(Math.min(100, gpu)) },
       }
@@ -144,7 +159,17 @@ function reducer(s, a) {
     case 'MACHINE':
       return { ...s, machines: { ...s.machines, [a.id]: a.online } }
     case 'ACT':
-      return { ...s, activity: [{ t: Date.now(), who: 'This browser', ...a.entry }, ...s.activity].slice(0, 80) }
+      return { ...s, activity: [withType({ t: Date.now(), who: 'This browser', ...a.entry }), ...s.activity].slice(0, 120) }
+    case 'TASKS':
+      return { ...s, tasks: a.tasks }
+    case 'MODULES':
+      return { ...s, modules: { ...s.modules, [a.id]: a.list } }
+    case 'PROFILE':
+      return { ...s, profile: { ...s.profile, [a.id]: a.value } }
+    case 'DEPLOY':
+      return { ...s, deploys: s.deploys.map((d) => (d.id === a.id ? { ...d, ...a.patch } : d)) }
+    case 'JOB':
+      return { ...s, jobs: s.jobs.map((j) => (j.id === a.id ? { ...j, ...a.patch } : j)) }
     case 'PLAN':
       return { ...s, plan: { ...s.plan, [a.id]: { ...s.plan[a.id], ...a.patch } } }
     case 'INBOX':
@@ -191,9 +216,9 @@ export function StoreProvider({ children }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({ plan: state.plan, inbox: state.inbox }))
+      localStorage.setItem(STORE_KEY, JSON.stringify({ plan: state.plan, inbox: state.inbox, tasks: state.tasks, modules: state.modules, profile: state.profile }))
     } catch {}
-  }, [state.plan, state.inbox])
+  }, [state.plan, state.inbox, state.tasks, state.modules, state.profile])
 
   const engine = useMemo(() => {
     const get = (id) => ref.current.registry.find((p) => p.id === id)
@@ -214,7 +239,7 @@ export function StoreProvider({ children }) {
       clear(id)
       const t0 = Date.now()
       dispatch({ type: 'RT', id, patch: { status: 'starting', phase: 'spawn', startedAt: t0, error: null, pid: pid(), cpu: 0, ram: 0, vram: 0 } })
-      dispatch({ type: 'LOG', id, lines: [line('agent', `── start requested from this browser ──`), line('agent', `spawn ${p.exe.split('\\').pop()} ${p.args.join(' ')}`), line('agent', 'job object attached')] })
+      dispatch({ type: 'LOG', id, lines: [line('agent', `── start requested from this browser (profile: ${ref.current.profile?.[id] || 'Default'}) ──`), line('agent', `spawn ${p.exe.split('\\').pop()} ${p.args.join(' ')}`), line('agent', 'job object attached')] })
       const step = p.bootMs / (p.bootLines.length + 2)
       later(id, 500, () => dispatch({ type: 'RT', id, patch: { phase: 'boot' } }))
       p.bootLines.forEach((l, i) => later(id, 500 + step * (i + 1), () => dispatch({ type: 'LOG', id, lines: [line('out', l)] })))
@@ -311,7 +336,30 @@ export function StoreProvider({ children }) {
         toast(on ? 'Agent back online.' : 'Agent offline. Controls are disabled until it reconnects.', on ? 'good' : 'bad')
       },
       plan: (id, patch) => dispatch({ type: 'PLAN', id, patch }),
+      // Only one Active project at a time; the rest is a priority label, independent of running state.
+      movePlan: (id, to) => {
+        const s = ref.current
+        const p = get(id)
+        if (to === 'active') {
+          const cur = s.registry.find((x) => x.id !== id && s.plan[x.id].state === 'active')
+          if (cur) return toast(`${cur.name} is still the active project. Ship it, or park it with a resume note, first.`, 'bad')
+        }
+        dispatch({ type: 'PLAN', id, patch: { state: to } })
+        toast(`${p.name} moved to ${{ active: 'Active', committed: 'Committed', queued: 'Queued', parked: 'Parked' }[to]}.`)
+      },
       inbox: (inbox) => dispatch({ type: 'INBOX', inbox }),
+      tasks: (tasks) => dispatch({ type: 'TASKS', tasks }),
+      modules: (id, list) => dispatch({ type: 'MODULES', id, list }),
+      setProfile: (id, value) => dispatch({ type: 'PROFILE', id, value }),
+      job: (id, patch) => dispatch({ type: 'JOB', id, patch }),
+      redeploy: (id) => {
+        dispatch({ type: 'DEPLOY', id, patch: { status: 'building', note: '' } })
+        dispatch({ type: 'ACT', entry: { action: 'Redeploy', project: id, result: 'Build started on Cloudflare Pages', type: 'deploy' } })
+        later('dep-' + id, 4200, () => {
+          dispatch({ type: 'DEPLOY', id, patch: { status: 'live', at: Date.now() } })
+          toast('Deployment is live.', 'good')
+        })
+      },
       register: (project) => {
         dispatch({ type: 'REGISTER', project })
         dispatch({ type: 'ACT', entry: { action: 'Register', project: project.id, result: 'Added to registry (demo)' } })

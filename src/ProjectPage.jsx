@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, statusOf } from './store'
 import { CATEGORIES, MACHINES, PLAN_STATES } from './data'
-import { Icon, Glyph, StatusPill, PlanChip, Button, Knob, Heartbeat, LiveBars, Led, STATUS, clock, ago, uptime, useNow, gb, catVar } from './ui'
-import { RunControls, Power, go } from './App'
+import { Icon, Glyph, StatusPill, PlanChip, Button, Knob, Gauge, Heartbeat, LiveBars, Led, STATUS, Status, clock, ago, uptime, useNow, gb, catVar } from './ui'
+import { Actions, go } from './App'
+import { MODULES, profilesFor, editorFor, GIT, TASK_COLS, TASK_TYPES } from './extra'
 import Readme from './Readme'
 
 const STEPS = [
@@ -91,8 +92,55 @@ function OverviewTab({ p, r, st, setTab }) {
   const c = catVar(p.category)
   const ramHist = r.hist.map((v) => (v ? p.profile.ram * (0.9 + (v % 7) / 50) : 0))
   const vramHist = r.hist.map((v) => (v && p.gpu ? p.profile.vram * (0.95 + (v % 5) / 80) : 0))
+  const { engine } = useStore()
+  const errs = r.logs.filter((l) => l.stream === 'err')
+  const lastSession = pl.sessions[0]
   return (
     <div className="tab-grid">
+      {st === 'failed' && (
+        <section className="panel span-3 diag" aria-label="Failure diagnostics">
+          <header className="panel-h">
+            <h3>Failure diagnostics</h3>
+            <span className="status status-bad"><Led status="failed" /><span>Exit code {r.lastExit}, {ago(r.failedAt)}</span></span>
+          </header>
+          <div className="diag-grid">
+            <pre className="code code-err">{errs.slice(-6).map((l) => l.text).join('\n') || r.error}</pre>
+            <div className="diag-side">
+              <div className="inset-note">
+                <span className="label">Likely cause</span>
+                <p>{pl.experiment || 'The process exited before its health check answered. Read the last stderr lines.'}</p>
+              </div>
+              <div className="row-btns">
+                <Actions p={p} open={false} more={false} size="md" />
+                <button className="btn" onClick={() => setTab('logs')}>
+                  <Icon name="logs" />
+                  <span>Full logs</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+      <section className="panel span-3 resume" aria-label="Resume">
+        <div className="resume-main">
+          <span className="label">Where you left off</span>
+          <p className="resume-last">{lastSession ? <>Last session {ago(new Date(lastSession.date).getTime() + 20 * 3600000)}: <b>{lastSession.note}</b> ({lastSession.mins} min)</> : 'No sessions logged yet.'}</p>
+          <p className="resume-next">
+            <span className="muted">Next action:</span> {pl.next}
+          </p>
+          {pl.resume && <p className="small muted">{pl.resume}</p>}
+        </div>
+        <div className="resume-act">
+          <button className="btn btn-primary" onClick={() => engine.toast(`The agent would open ${p.cwd} in ${editorFor(p)} on ${p.machine}.`)} disabled={st === 'offline'}>
+            <Icon name="open" />
+            <span>Resume in {editorFor(p)}</span>
+          </button>
+          <button className="btn" onClick={() => setTab('plan')}>
+            <Icon name="flag" />
+            <span>Plan</span>
+          </button>
+        </div>
+      </section>
       <Lifecycle p={p} r={r} st={st} />
 
       <section className="panel health">
@@ -117,10 +165,10 @@ function OverviewTab({ p, r, st, setTab }) {
           <h3>Resources</h3>
           <span className="muted small">{p.gpu ? `Expects ~${p.profile.vram} GB VRAM${p.exclusiveGpu ? ', GPU-exclusive' : ''}` : 'CPU only'}</span>
         </header>
-        <div className="metrics">
-          <Metric label="CPU" value={running ? r.cpu.toFixed(0) + '%' : '–'} data={r.hist} color={c} />
-          <Metric label="RAM" value={running ? gb(r.ram) : '–'} data={ramHist} color="var(--c-tools)" />
-          <Metric label="VRAM" value={p.gpu ? (running ? gb(r.vram) : '–') : 'n/a'} data={vramHist} color="var(--c-games)" />
+        <div className="dials dials-3">
+          <Gauge value={running ? r.cpu : 0} label="CPU" />
+          <Gauge value={running ? r.ram : 0} max={Math.max(2, Math.ceil(p.profile.ram * 1.5))} unit="G" label="RAM" />
+          {p.gpu ? <Gauge value={running ? r.vram : 0} max={16} unit="G" label="VRAM" /> : <Gauge value={0} max={16} unit="G" label="VRAM n/a" color="var(--dim)" />}
         </div>
       </section>
 
@@ -142,16 +190,6 @@ function OverviewTab({ p, r, st, setTab }) {
         </div>
       </section>
 
-      <section className="panel">
-        <header className="panel-h">
-          <h3>Next action</h3>
-          <button className="link small" onClick={() => setTab('plan')}>
-            Open plan
-          </button>
-        </header>
-        <p className="next-big">{pl.next}</p>
-        <div className="muted small">{pl.milestone}</div>
-      </section>
 
       <section className="panel">
         <header className="panel-h">
@@ -178,8 +216,9 @@ function OverviewTab({ p, r, st, setTab }) {
   )
 }
 
-function LogsTab({ p, r }) {
-  const [filter, setFilter] = useState('all')
+function LogsTab({ p, r, initial = 'all' }) {
+  const { engine } = useStore()
+  const [filter, setFilter] = useState(initial)
   const [q, setQ] = useState('')
   const [follow, setFollow] = useState(true)
   const [since, setSince] = useState(0)
@@ -214,6 +253,23 @@ function LogsTab({ p, r }) {
         <button className="link small" onClick={() => setSince(Date.now())}>
           Clear view
         </button>
+        <span className="tb-spacer" />
+        <button
+          className="btn btn-sm"
+          onClick={async () => {
+            const txt = lines.map((l) => `${clock(l.t)} ${l.stream.padEnd(6)} ${l.text}`).join('\n')
+            try {
+              await navigator.clipboard.writeText(txt)
+              engine.toast(`Copied ${lines.length} log lines.`, 'good')
+            } catch {
+              engine.toast('Copy is blocked here. Select the log text instead.', 'bad')
+            }
+          }}
+        >
+          <Icon name="copy" />
+          <span>Copy</span>
+        </button>
+        <Actions p={p} open={false} more={false} />
       </div>
       <div className="log" ref={box} tabIndex={0} aria-label={`${p.name} logs`}>
         {lines.length === 0 && <div className="log-empty">No lines yet. Start the project to see its output here.</div>}
@@ -469,7 +525,7 @@ function ModelsTab({ p }) {
             </thead>
             <tbody>
               {p.models.map((m) => (
-                <tr key={m.id} className={sel === m.id ? 'sel' : ''} onClick={() => engine.plan(p.id, { selectedModel: m.id })}>
+                <tr key={m.id} className={sel === m.id ? 'is-sel' : ''} onClick={() => engine.plan(p.id, { selectedModel: m.id })}>
                   <td>
                     <input type="radio" name="model" id={'m-' + m.id} checked={sel === m.id} onChange={() => engine.plan(p.id, { selectedModel: m.id })} aria-label={m.name} />
                   </td>
@@ -508,15 +564,141 @@ function ModelsTab({ p }) {
   )
 }
 
+
+function TasksTab({ p }) {
+  const { state, engine } = useStore()
+  const [t, setT] = useState('')
+  const mine = state.tasks.filter((x) => x.project === p.id)
+  const move = (id, col) => engine.tasks(state.tasks.map((x) => (x.id === id ? { ...x, col } : x)))
+  return (
+    <div className="mini-board">
+      {TASK_COLS.map(([k, label]) => {
+        const items = mine.filter((x) => x.col === k)
+        return (
+          <section key={k} className="panel-inset mb-col">
+            <header className="mb-h">
+              <b>{label}</b>
+              <span className="muted small num">{items.length}</span>
+            </header>
+            <ul>
+              {items.map((x) => (
+                <li key={x.id} className="task">
+                  <span className={'ttype ttype-' + x.type}>{TASK_TYPES[x.type]}</span>
+                  <span className="task-t">{x.title}</span>
+                  <select aria-label={`Move ${x.title}`} value={x.col} onChange={(e) => move(x.id, e.target.value)}>
+                    {TASK_COLS.map(([c, l]) => (
+                      <option key={c} value={c}>{l}</option>
+                    ))}
+                  </select>
+                </li>
+              ))}
+            </ul>
+            {k === 'backlog' && (
+              <form
+                className="inline-form"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (!t.trim()) return
+                  engine.tasks([...state.tasks, { id: 't' + Date.now(), project: p.id, title: t.trim(), col: 'backlog', type: 'feature', milestone: state.plan[p.id].milestone }])
+                  setT('')
+                }}
+              >
+                <input id={'nt-' + p.id} value={t} onChange={(e) => setT(e.target.value)} placeholder="Add a task" />
+              </form>
+            )}
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+function GitTab({ p }) {
+  const { engine } = useStore()
+  const g = GIT[p.id]
+  return (
+    <div className="tab-grid">
+      <section className="panel">
+        <header className="panel-h"><h3>Working tree</h3></header>
+        <div className="wells wells-3">
+          <div className="well"><div className="well-h"><span>Branch</span></div><div className="well-v well-code">{g.branch}</div></div>
+          <div className="well"><div className="well-h"><span>Changes</span></div><div className="well-v num">{g.dirty}<small> files</small></div></div>
+          <div className="well"><div className="well-h"><span>Sync</span></div><div className="well-v num">↑{g.ahead} ↓{g.behind}</div></div>
+        </div>
+        <div className="row-btns">
+          <button className="btn btn-sm" onClick={() => engine.toast('The agent would run git fetch in ' + p.cwd)}>Fetch</button>
+          <button className="btn btn-sm" disabled={!g.behind} onClick={() => engine.toast('The agent would run git pull --ff-only')}>Pull</button>
+          <a className="btn btn-sm" href={'https://' + g.remote} target="_blank" rel="noopener noreferrer"><Icon name="open" /><span>Open remote</span></a>
+        </div>
+      </section>
+      <section className="panel span-2 flat-panel">
+        <header className="panel-h"><h3>Recent commits</h3><span className="muted small">{g.remote}</span></header>
+        <ul className="commits">
+          {g.commits.map((c) => (
+            <li key={c.sha}>
+              <code>{c.sha}</code>
+              <span>{c.msg}</span>
+              <span className="muted small">{ago(c.at)}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  )
+}
+
+function ModulesTab({ p }) {
+  const { state, engine } = useStore()
+  const on = state.modules[p.id]
+  const toggle = (k) => engine.modules(p.id, on.includes(k) ? on.filter((x) => x !== k) : [...on, k])
+  return (
+    <div className="tab-grid">
+      <section className="panel span-2">
+        <header className="panel-h">
+          <div>
+            <h3>Modules</h3>
+            <span className="muted small">Turn on what this project needs. Tabs follow. No ProjectOS code changes per project.</span>
+          </div>
+        </header>
+        <ul className="modules">
+          {Object.entries(MODULES).map(([k, m]) => (
+            <li key={k}>
+              <label className="switch">
+                <input type="checkbox" checked={on.includes(k)} onChange={() => toggle(k)} disabled={k === 'runtime' && p.self} />
+                <span>
+                  <b>{m.label}</b>
+                  <span className="muted small"> {m.help}</span>
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="panel">
+        <header className="panel-h"><h3>Launch profiles</h3></header>
+        <ul className="plain-list">
+          {profilesFor(p).map((x) => (
+            <li key={x}>
+              <span>{x}</span>
+              {state.profile[p.id] === x && <span className="prio prio-active">Selected</span>}
+            </li>
+          ))}
+        </ul>
+        <p className="small muted">Each profile is a separate approved entry in registry.yaml: own args, env and port.</p>
+      </section>
+    </div>
+  )
+}
+
 export default function ProjectPage({ p, readme }) {
-  const { state } = useStore()
+  const { state, engine } = useStore()
   useNow(1000)
+  const st0 = statusOf(state, p)
   const [tab, setTabRaw] = useState(readme ? 'readme' : 'overview')
   useEffect(() => {
     if (readme) setTabRaw('readme')
     else setTabRaw((t) => (t === 'readme' ? 'overview' : t))
   }, [readme])
-  // README has its own address (#readme-<id>) so it can be bookmarked or shared.
   const setTab = (k) => {
     if (k === 'readme') return go('readme-' + p.id)
     setTabRaw(k)
@@ -525,46 +707,59 @@ export default function ProjectPage({ p, readme }) {
   const r = state.runtime[p.id]
   const st = statusOf(state, p)
   const pl = state.plan[p.id]
-  const tabs = [['overview', 'Overview'], ['readme', 'README'], ...(p.models ? [['models', 'Models']] : []), ['logs', 'Logs'], ['config', 'Config'], ['plan', 'Plan']]
+  const mods = state.modules[p.id] || []
+  const tabs = [
+    ['overview', 'Overview', true],
+    ['readme', 'README', mods.includes('docs')],
+    ['tasks', 'Tasks', mods.includes('tasks')],
+    ['logs', 'Logs', mods.includes('runtime')],
+    ['git', 'Git', mods.includes('git')],
+    ['models', 'Models', mods.includes('models') && p.models],
+    ['config', 'Config', true],
+    ['plan', 'Plan', true],
+    ['modules', 'Modules', true],
+  ].filter((t) => t[2])
   const errCount = r.logs.filter((l) => l.stream === 'err').length
+  const profiles = profilesFor(p)
+  const taskCount = state.tasks.filter((x) => x.project === p.id && x.col !== 'done').length
 
   return (
     <div className="page">
-      <header className={'proj-hero ph-' + st} style={{ '--c': catVar(p.category), '--h': p.hue }}>
-        <a href="#overview" className="crumb">
-          <Icon name="back" /> All projects
-        </a>
-        <div className="ph-row">
-          <Power p={p} big />
-          <div className="ph-title">
-            <h1>{p.name}</h1>
-            <p>{p.blurb}</p>
-            <div className="ph-meta">
-              <span className={'st st-' + STATUS[st].tone}>
-                <Led status={st} />
-                {STATUS[st].label}
-                {st === 'running' && <span className="num"> {uptime(r.startedAt)}</span>}
-              </span>
-              <PlanChip state={pl.state} />
-              <span className="ph-tag">{CATEGORIES[p.category]}</span>
-              <span className="ph-tag">{p.kind}</span>
-              <span className="ph-tag">{p.machine}</span>
-              {p.port && <span className="ph-tag num">{p.udp ? 'UDP' : 'port'} {p.port}</span>}
-            </div>
+      <header className={'ws-head ws-' + st}>
+        <Glyph p={p} size={48} />
+        <div className="ws-title">
+          <h1>{p.name}</h1>
+          <p className="muted">{p.blurb}</p>
+          <div className="ws-meta">
+            <Status status={st} sub={st === 'running' ? uptime(r.startedAt) : null} />
+            <span className={'prio prio-' + pl.state}>{PLAN_STATES[pl.state].label}</span>
+            <span className="tag">{CATEGORIES[p.category]}</span>
+            <span className="tag">{p.kind}</span>
+            <span className="tag">{p.machine}</span>
+            {p.port && <span className="tag num">{p.udp ? 'UDP' : 'port'} {p.port}</span>}
           </div>
-          <div className="ph-actions">
-            <RunControls p={p} />
-          </div>
+        </div>
+        <div className="ws-actions">
+          {profiles.length > 1 && (
+            <label className="sel">
+              <span>Profile</span>
+              <select id={'prof-' + p.id} value={state.profile[p.id]} onChange={(e) => engine.setProfile(p.id, e.target.value)} disabled={st === 'running' || st === 'starting'}>
+                {profiles.map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <Actions p={p} size="md" />
         </div>
         {st === 'starting' && <div className="ph-progress" />}
       </header>
 
       {st === 'offline' && (
-        <div className="callout">
+        <div className="banner">
           <Icon name="warn" />
           <div>
-            <b>{MACHINES[p.machine].label} isn’t connected to ProjectOS.</b>
-            <div className="small">{MACHINES[p.machine].note || 'Start the PC and the agent reconnects on its own.'}</div>
+            <b>{MACHINES[p.machine].label} isn’t connected to ProjectOS.</b> {MACHINES[p.machine].note || 'Start the PC and the agent reconnects on its own.'}
           </div>
         </div>
       )}
@@ -575,6 +770,7 @@ export default function ProjectPage({ p, readme }) {
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
             {v}
             {k === 'logs' && errCount > 0 && <span className="tab-badge num">{errCount}</span>}
+            {k === 'tasks' && taskCount > 0 && <span className="tab-count num">{taskCount}</span>}
           </button>
         ))}
       </div>
@@ -582,10 +778,13 @@ export default function ProjectPage({ p, readme }) {
       <div className="tab-body" key={tab}>
         {tab === 'readme' && <Readme p={p} />}
         {tab === 'overview' && <OverviewTab p={p} r={r} st={st} setTab={setTab} />}
-        {tab === 'logs' && <LogsTab p={p} r={r} />}
+        {tab === 'logs' && <LogsTab p={p} r={r} initial={st === 'failed' ? 'err' : 'all'} />}
+        {tab === 'tasks' && <TasksTab p={p} />}
+        {tab === 'git' && <GitTab p={p} />}
         {tab === 'config' && <ConfigTab p={p} />}
         {tab === 'plan' && <PlanTab p={p} />}
         {tab === 'models' && <ModelsTab p={p} />}
+        {tab === 'modules' && <ModulesTab p={p} />}
       </div>
     </div>
   )

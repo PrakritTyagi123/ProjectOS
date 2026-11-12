@@ -50,6 +50,20 @@ const paths = {
   copy: 'M5.5 5.5h7v7h-7zM3.5 10.5v-7h7',
   bolt: 'M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z',
   menu: 'M2.5 4h11M2.5 8h11M2.5 12h11',
+  more: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
+  git: 'M5 3v10M5 13a1.5 1.5 0 1 0 0-.01M11 5.5a1.5 1.5 0 1 0 0-.01M11 7c0 2.5-6 2-6 4.5',
+  cloud: 'M4.5 12.5h7a3 3 0 0 0 .3-6 4 4 0 0 0-7.6 1.1A2.5 2.5 0 0 0 4.5 12.5z',
+  game: 'M4 5.5h8a2.5 2.5 0 0 1 2.4 3.2l-.8 2.8a1.5 1.5 0 0 1-2.6.5L9.6 10.5H6.4L5 12a1.5 1.5 0 0 1-2.6-.5l-.8-2.8A2.5 2.5 0 0 1 4 5.5zM5 7.5v2M4 8.5h2M10.5 8h.01M11.8 9.2h.01',
+  chip: 'M4.5 4.5h7v7h-7zM6.5 2v2.5M9.5 2v2.5M6.5 11.5V14M9.5 11.5V14M2 6.5h2.5M2 9.5h2.5M11.5 6.5H14M11.5 9.5H14',
+  chev: 'M6 4l4 4-4 4',
+  chevd: 'M4 6l4 4 4-4',
+  sidebar: 'M2 2.5h12v11H2zM6 2.5v11',
+  rows: 'M2.5 3.5h11M2.5 8h11M2.5 12.5h11',
+  folder: 'M1.5 4v8.5h13V5.5H7.5L6 4z',
+  pulse: 'M1.5 8h3l1.5-4 3 8 1.5-4h4',
+  logs: 'M3 2.5h10v11H3zM5.5 5.5h5M5.5 8h5M5.5 10.5h3',
+  cog: 'M8 10.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4',
+  clock: 'M8 14.5a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM8 4.5V8l2.5 1.5',
   doc: 'M4 1.5h5.5L12.5 4.5V14.5H4zM9.5 1.5v3h3M6 8h4.5M6 10.5h4.5',
   edit: 'M10.5 2.5l3 3L6 13H3v-3zM9 4l3 3',
   image: 'M2 3h12v10H2zM2 11l3.5-3.5 3 3 2-2L14 12M10.5 6.2h.01',
@@ -292,6 +306,68 @@ export function LiveBars({ data, color }) {
       {data.map((v, i) => (
         <span key={i} style={{ height: Math.max(4, (v / max) * 100) + '%' }} />
       ))}
+    </div>
+  )
+}
+
+// Small, consistent status indicator: dot + label.
+export function Status({ status, label, sub }) {
+  const s = STATUS[status]
+  return (
+    <span className={'status status-' + s.tone}>
+      <Led status={status} />
+      <span>{label || s.label}</span>
+      {sub && <span className="status-sub">{sub}</span>}
+    </span>
+  )
+}
+
+// Popover menu. Closes on outside click and Escape.
+export function Menu({ label = 'More actions', items, align = 'right' }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const off = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false)
+    const key = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('pointerdown', off)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('pointerdown', off)
+      document.removeEventListener('keydown', key)
+    }
+  }, [open])
+  return (
+    <div className="menu" ref={ref}>
+      <button className="btn btn-icon btn-sm" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={(e) => (e.stopPropagation(), setOpen(!open))}>
+        <Icon name="more" />
+      </button>
+      {open && (
+        <div className={'menu-pop menu-' + align} role="menu">
+          {items.filter(Boolean).map((it, i) =>
+            it === '-' ? (
+              <hr key={i} />
+            ) : it.head ? (
+              <div key={i} className="menu-head">{it.head}</div>
+            ) : (
+              <button
+                key={i}
+                role="menuitem"
+                className={'menu-item ' + (it.danger ? 'menu-danger' : '')}
+                disabled={it.disabled}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setOpen(false)
+                  it.onClick()
+                }}
+              >
+                {it.icon && <Icon name={it.icon} />}
+                <span>{it.label}</span>
+              </button>
+            )
+          )}
+        </div>
+      )}
     </div>
   )
 }
